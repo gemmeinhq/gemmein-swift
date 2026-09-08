@@ -149,9 +149,9 @@ throws. `KeychainTokenStore(appKey:)` is the default;
 
 **The public key identifies the app; the session authorises the person;
 verified domains are for browsers.** Ship the `pk_…` key in your app — that is
-what it is for. A secret key (`sk_…`) is refused by `Gemmein` on purpose:
-`GemmeinServer` ships in this package for parity and for Swift that runs on a
-server, and it belongs there, never in an app bundle.
+what it is for. `GemmeinServer` ships in this package for Swift that runs on a server. It takes a
+secret key (`sk_…`), and a secret key never belongs in an app bundle — the `Gemmein`
+client refuses one.
 
 ## Store purchases
 
