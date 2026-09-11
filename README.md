@@ -87,10 +87,13 @@ the device is `async throws` and throws `GemmeinError`.
 | `update(_:_:ifVersion:published:)` | `@discardableResult func update(_ id: String, _ data: [String: JSONValue], ifVersion: Int? = nil, published: Bool? = nil) async throws -> GemmeinRecord` | `GemmeinRecord` |
 | `delete(_:)` | `func delete(_ id: String) async throws` | `Void` |
 | `upload(_:name:contentType:for:)` | `func upload(_ data: Data, name: String = "upload", contentType: String = "", for recipient: String? = nil) async throws -> UploadedFile` | `UploadedFile` — `id`, `ref` (`file:<uuid>`), `contentType`, `sizeBytes: Int` |
+| `count(where:search:)` | `func count(where filter: [String: JSONValue]? = nil, search: String? = nil) async throws -> Int` | `Int` — how many records this person could list, under the same rule, scope and filters |
+| `stats(_:where:search:)` | `func stats(_ field: String, where filter: [String: JSONValue]? = nil, search: String? = nil) async throws -> RecordStats` | `RecordStats` — `count`, `sum`, `avg`, `min`, `max` (nil when no record held a number) |
 | `watch(every:where:search:limit:onChange:)` | `func watch(every: TimeInterval? = nil, where filter: [String: JSONValue]? = nil, search: String? = nil, limit: Int? = nil, onChange: @escaping @Sendable (WatchDelta) -> Void) -> Watcher` | `Watcher` — not `async`; end it with `watcher.stop()` |
 
 `ListOptions(limit:sort:where:cursor:search:expand:since:)` — all optional.
 `sort` is `ListSort`: `.newest`, `.oldest`, `.updated`.
+`where` is the same on `list`, `watch`, `count` and `stats`: a literal is an exact match; an object of operators narrows it — `eq` `ne` `gt` `gte` `lt` `lte` `in` `nin` `contains` `startsWith` `exists` (`["amount": ["gte": .int(10)], "status": ["in": ["paid", "sent"]]]`). Up to 5 fields, 1 to 3 operators each, all AND.
 
 ### The primitives
 

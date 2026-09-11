@@ -104,6 +104,31 @@ public final class CollectionClient: @unchecked Sendable {
         return ListResult(json: try requireObject(try await request(query), "a list"))
     }
 
+    /// How many records this person could list — the same rule, scope and
+    /// filters as `list()`, as one number. `where` takes the list's own
+    /// grammar: a literal (exact match) or an object of operators
+    /// (`["amount": ["gte": 10]]`).
+    // route: GET /storage/{collection}/count
+    public func count(where filter: [String: JSONValue]? = nil, search: String? = nil) async throws -> Int {
+        var pairs: [(String, String)] = []
+        if let filter { pairs.append(("where", JSONCodec.string(filter))) }
+        if let search { pairs.append(("search", search)) }
+        let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
+        let body = try requireObject(try await request("/count\(query)"), "a count")
+        return body["count"]?.int ?? 0
+    }
+
+    /// `count`, `sum`, `avg`, `min`, `max` of one numeric field over the
+    /// records this person could list. Records whose field is not a number
+    /// are skipped; the four are nil when none was.
+    // route: GET /storage/{collection}/stats
+    public func stats(_ field: String, where filter: [String: JSONValue]? = nil, search: String? = nil) async throws -> RecordStats {
+        var pairs: [(String, String)] = [("field", field)]
+        if let filter { pairs.append(("where", JSONCodec.string(filter))) }
+        if let search { pairs.append(("search", search)) }
+        return RecordStats(json: try requireObject(try await request("/stats?\(formURLEncode(pairs))"), "stats"))
+    }
+
     /// Live-enough, honestly. Explicitly POLLING: a full list first, then
     /// "what changed?" every `every` seconds (default 10, floor 5) through
     /// exactly the same permission gate as `list()`. Nothing is pushed.

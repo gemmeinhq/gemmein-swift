@@ -96,7 +96,11 @@ public enum ListSort: String, Sendable {
 public struct ListOptions: Sendable {
     public var limit: Int?
     public var sort: ListSort?
-    /// Exact-match filter on your `data` fields, e.g. `["done": false]`.
+    /// Filter on your `data` fields: a literal is an exact match
+    /// (`["done": false]`); an object of operators narrows it —
+    /// `eq` `ne` `gt` `gte` `lt` `lte` `in` `nin` `contains` `startsWith`
+    /// `exists` (`["amount": ["gte": 10], "status": ["in": ["paid", "sent"]]]`).
+    /// Up to 5 fields, 1 to 3 operators each, all AND.
     public var `where`: [String: JSONValue]?
     /// Opaque page cursor from a previous `ListResult`.
     public var cursor: String?
@@ -138,6 +142,27 @@ public struct ListOptions: Sendable {
         if let expand, !expand.isEmpty { pairs.append(("expand", expand.joined(separator: ","))) }
         if let since { pairs.append(("since", since)) }
         return pairs
+    }
+}
+
+/// The answer to `stats(_:where:search:)`: `count` is how many records held
+/// a number in the field; the four are nil when none did. A sum past 2^53
+/// arrives as its decimal text in `sumText`.
+public struct RecordStats: Sendable, Equatable {
+    public let count: Int
+    public let sum: Double?
+    public let avg: Double?
+    public let min: Double?
+    public let max: Double?
+    public let sumText: String?
+
+    init(json: [String: JSONValue]) {
+        count = json["count"]?.int ?? 0
+        sum = json["sum"]?.double
+        avg = json["avg"]?.double
+        min = json["min"]?.double
+        max = json["max"]?.double
+        sumText = json["sum"]?.string
     }
 }
 
