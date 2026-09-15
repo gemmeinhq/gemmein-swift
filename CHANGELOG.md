@@ -10,6 +10,21 @@ rather than a habit, and the release check refuses a build whose version does
 not match the npm SDK's. Read the JS SDK's
 [`CHANGELOG.md`](../sdk/CHANGELOG.md) for the engine behind each release.
 
+## [0.11.0] — 2026-09-15
+
+Pinned to `@gemmein/sdk` 0.11.0 and engine 0.12.0.
+
+### Added
+
+- `count(where:search:)` and `stats(_:where:search:)` on the collection
+  client — how many records this person could list, and `{ count, sum, avg,
+  min, max }` over the records whose field holds a number — by the parity law
+  (the JS SDK's RUNTIME phase 5 surface).
+- `where` takes, per field, a literal or an object of operators: `eq` / `ne`,
+  `gt` / `gte` / `lt` / `lte`, `in` / `nin`, `contains` / `startsWith`,
+  `exists` — up to 5 fields, 1..3 operators per field, all AND; the cloud
+  answers `invalid_filter` (400) outside the grammar.
+
 ## [0.10.0] — 2026-09-08
 
 First release. Born pinned to `@gemmein/sdk` 0.10.0 and engine 0.11.0.

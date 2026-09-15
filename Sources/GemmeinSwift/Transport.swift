@@ -3,11 +3,11 @@ import Foundation
 /// This build's version. It tracks the npm SDK's major.minor — the two travel
 /// together by law, and the release check pins them equal.
 public enum GemmeinSwift {
-    public static let version = "0.10.0"
+    public static let version = "0.11.0"
 
     /// `x-client-info` — what every request tells the engine it is. The
     /// engine's key-usage ledger records it ("last seen from
-    /// gemmein-swift/0.10.0 ios"), so a misbehaving build can be attributed
+    /// gemmein-swift/0.11.0 ios"), so a misbehaving build can be attributed
     /// from day one. It is a report, not a proof.
     public static let clientInfo = "gemmein-swift/\(version)"
 
