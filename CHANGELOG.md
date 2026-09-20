@@ -10,6 +10,12 @@ rather than a habit, and the release check refuses a build whose version does
 not match the npm SDK's. Read the JS SDK's
 [`CHANGELOG.md`](../sdk/CHANGELOG.md) for the engine behind each release.
 
+## [0.12.0] — 2026-09-20
+
+Pinned to `@gemmein/sdk` 0.12.0 and engine 0.13.0.
+
+The release where a tool can run on the founder's own pipeline (`docs/DECISION-PIPELINE-PROVIDER.md`). Nothing in the Swift surface changes: `g.ai.run` behaves as before; a run on a pipeline tool is started and read through the same doors. The JS SDK's new `pipelines.handle` is a server-side helper for the pipeline's own host and is a named dormant surface here (the parity check knows it by name). Version travels with the JS SDK, as the law says.
+
 ## [0.11.0] — 2026-09-15
 
 Pinned to `@gemmein/sdk` 0.11.0 and engine 0.12.0.
