@@ -1,10 +1,6 @@
-# SwiftPM build products. `.build` also holds ONE generated .swift file
-# (GemmeinSwiftPackageTests.derived/runner.swift), and
-# tests/security/sdkParity.test.ts walks every .swift file under this
-# directory — so a committed .build would put generated code in front of the
-# parity check.
 .build/
 .swiftpm/
-*.xcodeproj
-*.xcworkspace
 DerivedData/
+xcuserdata/
+*.xcuserstate
+.DS_Store
