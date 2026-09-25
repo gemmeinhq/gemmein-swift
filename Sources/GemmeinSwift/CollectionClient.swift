@@ -96,7 +96,8 @@ public final class CollectionClient: @unchecked Sendable {
     }
 
     /// List records this person is allowed to see under the collection's
-    /// safety rule (the app owner sees everyone's).
+    /// safety rule — the app's owner signed in to the app included (an
+    /// ordinary customer; the dashboard is where the owner sees everyone's).
     // route: GET /storage/{collection}
     public func list(_ options: ListOptions = ListOptions()) async throws -> ListResult {
         let pairs = options.queryPairs

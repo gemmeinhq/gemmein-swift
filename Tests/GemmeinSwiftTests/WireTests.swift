@@ -474,6 +474,23 @@ final class WireTests: XCTestCase {
 
     // ── the gate (secret key) ────────────────────────────────────────────
 
+    /// FULL BOUNDARY (23 Sep 2026): GemmeinServer runs only where no
+    /// customer holds the binary. On macOS a `.app` bundle is an app its
+    /// users install; a plain executable (`swift run`, Vapor) is a server.
+    func testTheServerRefusesInsideAMacAppBundle() {
+        #if os(macOS)
+        XCTAssertTrue(GemmeinServer.runsInsideAnApp(bundlePath: "/Applications/Inkling.app", executablePath: nil))
+        XCTAssertTrue(GemmeinServer.runsInsideAnApp(bundlePath: "/Users/me/Build/Products/Debug/Inkling.app/", executablePath: nil))
+        XCTAssertTrue(GemmeinServer.runsInsideAnApp(bundlePath: "/Applications/Inkling.app/Contents/PlugIns/Share.appex", executablePath: nil))
+        XCTAssertTrue(GemmeinServer.runsInsideAnApp(bundlePath: "/Applications/Inkling.app/Contents/XPCServices/Sync.xpc", executablePath: nil))
+        XCTAssertTrue(GemmeinServer.runsInsideAnApp(bundlePath: "/Applications/Inkling.app/Contents/MacOS", executablePath: "/Applications/Inkling.app/Contents/MacOS/InklingHelper"))
+        XCTAssertFalse(GemmeinServer.runsInsideAnApp(bundlePath: "/Users/me/api/.build/debug", executablePath: "/Users/me/api/.build/debug/Run"))
+        XCTAssertFalse(GemmeinServer.runsInsideAnApp(bundlePath: "/usr/local/bin", executablePath: "/usr/local/bin/api"))
+        #endif
+        // This test binary is not an app bundle, so a server key is accepted here.
+        XCTAssertNoThrow(try GemmeinServer(secretKey: "sk_test_1", apiURL: apiURL, session: StubURLProtocol.session()))
+    }
+
     func testTheGateSendsTheSecretKeyAndItsOwnClientInfo() async throws {
         StubURLProtocol.queue([
             .init(body: Data(#"{"ok":true,"person":{"id":"usr_1","email":"a@b.test","role":"member"},"holdings":{"access":["access:pro"],"grants":[{"id":"gr_1","entitlement":"access:pro","source":"trial","startsAt":"2026-09-01T00:00:00.000Z","expiresAt":null}],"credits":{"balance":7}}}"#.utf8)),

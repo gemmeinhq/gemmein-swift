@@ -26,9 +26,52 @@ public final class GemmeinServer: @unchecked Sendable {
                     : "GemmeinServer needs a secret key (it starts with \"sk_\") — create one in the dashboard at https://app.gemmein.com and pass it from a server env var"
             )
         }
+        // FULL BOUNDARY (23 Sep 2026) — the same refusal as the JS SDK's
+        // `secret_key_in_client`. THE RULE: GemmeinServer runs only where no
+        // customer holds the binary.
+        //   · iOS, tvOS, watchOS, visionOS — always an app → refused.
+        //   · macOS inside an app bundle — Bundle.main's path ends in `.app`,
+        //     `.appex` (an extension) or `.xpc` (a service), or the executable
+        //     sits anywhere inside a `.app` (a helper under Contents/MacOS,
+        //     Contents/Library/LoginItems, …) → refused: a Mac app ships to
+        //     the people who install it.
+        //   · macOS or Linux as a plain executable — Vapor, Hummingbird, a
+        //     command-line job, `swift run` on a dev machine → allowed.
+        if GemmeinServer.runsInsideAnApp() {
+            throw GemmeinError(
+                status: 0,
+                code: "secret_key_in_client",
+                message: "A secret key (sk_) cannot run in a browser or a mobile app — anyone using the app could read it and act as your server. Keep it on your server (an API route, a server action, a worker) and call that from the app; for an admin screen, see \"Admin views\" in the Gemmein guide. Your Gemmein dashboard already shows every customer."
+            )
+        }
         self.apiURL = apiURL
         self.secretKey = secretKey
         self.session = session
+    }
+
+    /// True when this process is an app its users install — every Apple
+    /// platform but macOS, and a macOS `.app` bundle. `bundlePath` is the
+    /// seam a test drives.
+    static func runsInsideAnApp(
+        bundlePath: String = Bundle.main.bundlePath,
+        executablePath: String? = Bundle.main.executablePath
+    ) -> Bool {
+        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+        return true
+        #else
+        let bundle = bundlePath.hasSuffix("/") ? String(bundlePath.dropLast()) : bundlePath
+        for suffix in [".app", ".appex", ".xpc"] where bundle.hasSuffix(suffix) { return true }
+        // A helper binary inside an app bundle (Contents/MacOS/Helper, a login
+        // item, a bundled tool) has its own Bundle.main but still ships inside
+        // the app.
+        // (Contents/Developer — Xcode's own toolchain, e.g. xctest — is not an
+        // app's payload.)
+        if let exe = executablePath {
+            for part in ["MacOS", "Library", "Helpers", "PlugIns", "XPCServices", "Frameworks", "Resources"]
+            where exe.contains(".app/Contents/\(part)/") { return true }
+        }
+        return false
+        #endif
     }
 
     // route: none
@@ -248,6 +291,38 @@ public final class ServerCollectionClient: @unchecked Sendable {
     public func update(_ id: String, _ data: [String: JSONValue]) async throws -> GemmeinRecord {
         let body = try await request("/\(percentEncodeComponent(id))", method: "PATCH", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
+    }
+
+    /// Create a record from your server, under ANY rule, when the key may
+    /// write this collection. Whose record it is, per rule: private · shared ·
+    /// community → `for:` its owner; admin_write · public_read → no person;
+    /// addressed → `for:` the recipient; direct → `from:` the author and
+    /// `for:` the recipient. A missing or extra person is `person_required` /
+    /// `invalid_person`; a read-only key is `scope_denied`.
+    // route: POST /storage/{collection}
+    @discardableResult
+    public func create(
+        _ data: [String: JSONValue],
+        for person: String? = nil,
+        from author: String? = nil,
+        key: String? = nil,
+        published: Bool? = nil
+    ) async throws -> GemmeinRecord {
+        var pairs: [(String, String)] = []
+        if let person { pairs.append(("for", person)) }
+        if let author { pairs.append(("from", author)) }
+        if let key { pairs.append(("key", key)) }
+        if let published { pairs.append(("published", published ? "true" : "false")) }
+        let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
+        let body = try await request(query, method: "POST", body: try JSONCodec.encode(data))
+        return GemmeinRecord(json: try requireObject(body, "a record"))
+    }
+
+    /// Delete any record in a collection this key may DELETE — its own tick at
+    /// mint (or a full key); a key without it is `scope_denied`.
+    // route: DELETE /storage/{collection}/{id}
+    public func delete(_ id: String) async throws {
+        _ = try await request("/\(percentEncodeComponent(id))", method: "DELETE")
     }
 
     private func request(_ suffix: String, method: String = "GET", body: Data? = nil) async throws -> JSONValue? {

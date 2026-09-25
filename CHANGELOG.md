@@ -10,6 +10,12 @@ rather than a habit, and the release check refuses a build whose version does
 not match the npm SDK's. Read the JS SDK's
 [`CHANGELOG.md`](../sdk/CHANGELOG.md) for the engine behind each release.
 
+## [0.13.0] — 2026-09-25
+
+Pinned to `@gemmein/sdk` 0.13.0 and engine 0.14.0.
+
+The owner and the app are separate, and secret keys write. `AiClient.upload(_:_:name:contentType:)` takes a customer's audio for a transcribe tool and returns a sealed reference for `run`. `GemmeinServer` collections gain `create(_:for:from:key:published:)` and `delete(_:)`, limited by the key's scopes, and `GemmeinServer` refuses to run on iOS, tvOS, watchOS and visionOS (`secret_key_in_client`). `GemmeinRecord.writtenBy` is `"server"` on a record a secret key created. Read the JS SDK's 0.13.0 entry for the engine behind each change.
+
 ## [0.12.0] — 2026-09-20
 
 Pinned to `@gemmein/sdk` 0.12.0 and engine 0.13.0.

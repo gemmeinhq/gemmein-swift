@@ -146,6 +146,60 @@ public final class AiClient: @unchecked Sendable {
         try await lift(await run(tool, inputs: inputs), streamHint: "use run(_:inputs:stream:) and read the stream")
     }
 
+    /// Upload AUDIO for a TRANSCRIPTION tool — the tool's own door, the only
+    /// place a customer's audio is accepted. The reference it returns is
+    /// sealed to the signed-in person and goes straight into the run:
+    ///
+    ///     let file = try await g.ai.upload("transcribe-note", data, name: "note.m4a", contentType: "audio/mp4")
+    ///     let answer = try await g.ai.run("transcribe-note", inputs: ["audio": .string(file.ref)])
+    ///
+    /// mp3, m4a, wav, webm, ogg or flac; the bytes must be the type declared.
+    /// The cap is the tool's provider's (25 MB; 14 MB on Google). Refusals,
+    /// all `GemmeinError`: `session_required` (401) · `unknown_tool` (404) ·
+    /// `tool_disabled` (403) · `audio_not_accepted` (400 — not a transcribe
+    /// tool) · `entitlement_required` (403) · `unsupported_audio_type` (400)
+    /// · `file_too_large` (413) · `ai_capped` (429) · `upload_failed`.
+    // route: POST /ai/run/{tool}/upload
+    // route: POST /ai/run/{tool}/upload/{fileId}/confirm
+    public func upload(_ tool: String, _ data: Data, name: String = "audio", contentType: String = "") async throws -> UploadedFile {
+        let base = "/ai/run/\(percentEncodeComponent(tool))/upload"
+        let presign = try requireObject(
+            try await runtimeRequest(config, base, method: "POST", body: try JSONCodec.encode(["name": name, "size": data.count, "contentType": contentType] as [String: Any]), extraHeaders: ["content-type": "application/json"]),
+            "an audio upload"
+        )
+        guard let fileId = presign["fileId"]?.string,
+              let uploadURLString = presign["uploadUrl"]?.string,
+              let uploadURL = URL(string: uploadURLString) else {
+            throw GemmeinError(status: 0, code: "invalid_response", message: "Gemmein answered an upload in a shape this SDK does not recognise")
+        }
+        // Straight to the object store, presigned POST; the `file` part LAST.
+        let boundary = "gemmein-\(UUID().uuidString)"
+        var form = Data()
+        func append(_ text: String) { form.append(Data(text.utf8)) }
+        for (key, value) in presign["fields"]?.object ?? [:] {
+            append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(value.string ?? "")\r\n")
+        }
+        append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(name)\"\r\n")
+        append("Content-Type: \(contentType.isEmpty ? "application/octet-stream" : contentType)\r\n\r\n")
+        form.append(data)
+        append("\r\n--\(boundary)--\r\n")
+        var storeRequest = URLRequest(url: uploadURL)
+        storeRequest.httpMethod = "POST"
+        storeRequest.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "content-type")
+        storeRequest.httpBody = form
+        let (_, storeResponse) = try await transported(config.apiURL) { try await config.session.data(for: storeRequest) }
+        let storeStatus = (storeResponse as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(storeStatus) else {
+            throw GemmeinError(status: storeStatus, code: "upload_failed", message: "Upload failed: \(storeStatus)")
+        }
+        // Confirm: the bytes prove their type; only now does the reference exist.
+        let confirmed = try requireObject(
+            try await runtimeRequest(config, "\(base)/\(percentEncodeComponent(fileId))/confirm", method: "POST", extraHeaders: ["content-type": "application/json"]),
+            "an audio upload"
+        )
+        return UploadedFile(json: confirmed)
+    }
+
     /// The signed-in person's OWN AI calls, newest first — what they ran,
     /// when, what it cost, how it ended; the prompt and answer only where the
     /// tool keeps them. Session required.

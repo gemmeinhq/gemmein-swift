@@ -33,6 +33,10 @@ public struct GemmeinRecord: Sendable, Equatable {
     public let audienceUserId: String?
     /// Draft state on the public rules — a server column, never a data field.
     public let published: Bool
+    /// "server" when your server's secret key created this record (e.g. a
+    /// direct message imported from a person) — show it as sent by the
+    /// server. nil when a person (or the dashboard) wrote it.
+    public let writtenBy: String?
     /// Linked records you asked to expand, per field — only what you could
     /// read directly; unreadable or deleted targets are nil.
     public let expand: [String: GemmeinRecord?]
@@ -53,6 +57,7 @@ public struct GemmeinRecord: Sendable, Equatable {
         key = json["key"]?.string
         audienceUserId = json["audienceUserId"]?.string
         published = json["published"]?.bool ?? true
+        writtenBy = json["writtenBy"]?.string
         var expanded: [String: GemmeinRecord?] = [:]
         for (field, value) in json["expand"]?.object ?? [:] {
             // updateValue, not subscript assignment: an unreadable or deleted

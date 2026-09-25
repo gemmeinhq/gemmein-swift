@@ -154,7 +154,12 @@ throws. `KeychainTokenStore(appKey:)` is the default;
 verified domains are for browsers.** Ship the `pk_…` key in your app — that is
 what it is for. `GemmeinServer` ships in this package for Swift that runs on a server. It takes a
 secret key (`sk_…`), and a secret key never belongs in an app bundle — the `Gemmein`
-client refuses one.
+client refuses one, and `GemmeinServer` itself refuses to start inside anything
+its users install (`secret_key_in_client`): every iOS, tvOS, watchOS and
+visionOS app, and on macOS an `.app`, an app extension (`.appex`), an XPC
+service (`.xpc`) or a helper shipped inside an app bundle. A plain executable
+on macOS or Linux — Vapor, Hummingbird, a command-line job, `swift run` — is a
+server, and runs.
 
 ## Store purchases
 
