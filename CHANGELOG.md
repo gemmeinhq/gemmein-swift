@@ -10,6 +10,15 @@ rather than a habit, and the release check refuses a build whose version does
 not match the npm SDK's. Read the JS SDK's
 [`CHANGELOG.md`](../sdk/CHANGELOG.md) for the engine behind each release.
 
+## [0.13.1] — 2026-10-03
+
+Pinned to `@gemmein/sdk` 0.13.4 and engine 0.19.0.
+
+Docs only. `CollectionClient`'s doc comment links the dashboard's Collections
+guide (https://docs.gemmein.com/console/collections) instead of copying the
+dashboard's click path, so a dashboard change never makes the package's docs
+wrong. No API change.
+
 ## [0.13.0] — 2026-09-25
 
 Pinned to `@gemmein/sdk` 0.13.0 and engine 0.14.0.

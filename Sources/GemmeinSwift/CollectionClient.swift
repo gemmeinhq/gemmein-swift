@@ -52,7 +52,7 @@ public final class Watcher: @unchecked Sendable {
 }
 
 /// Talks to one collection. Collections themselves are created by the app
-/// owner in their dashboard (app.gemmein.com → data) — a 404
+/// owner in the dashboard (https://docs.gemmein.com/console/collections) — a 404
 /// `unknown_collection` means it doesn't exist yet: ask the owner to create it
 /// there, don't retry.
 public final class CollectionClient: @unchecked Sendable {
