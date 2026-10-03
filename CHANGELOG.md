@@ -10,6 +10,14 @@ rather than a habit, and the release check refuses a build whose version does
 not match the npm SDK's. Read the JS SDK's
 [`CHANGELOG.md`](../sdk/CHANGELOG.md) for the engine behind each release.
 
+## [0.14.0] — 2026-10-03
+
+Pinned to `@gemmein/sdk` 0.14.0 and engine 0.20.0.
+
+- `payments.products()` → `[CatalogProduct]` and `subscriptions.plans()` →
+  `[CatalogPlan]` (with `CatalogPrice`): what the app sells, read without
+  signing in. Keep each item's words and pictures in your app, keyed by `name`.
+
 ## [0.13.1] — 2026-10-03
 
 Pinned to `@gemmein/sdk` 0.13.4 and engine 0.19.0.

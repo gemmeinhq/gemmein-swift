@@ -286,6 +286,46 @@ public struct CheckoutSession: Sendable, Equatable {
     public let plan: String
 }
 
+/// ONE CATALOG: a product the app sells, as `payments.products()` answers
+/// it. Payments → Products in the dashboard IS the catalog; your own words
+/// and pictures for each item live in your code, keyed by `name`.
+public struct CatalogProduct: Sendable, Equatable {
+    /// The name `payments.buy(_:)` takes.
+    public let name: String
+    /// Minor units (1500 = 15.00) and a lower-case ISO currency.
+    public let price: CatalogPrice
+    /// What the buyer receives: "file", "link" or "none".
+    public let delivers: String
+    /// Credits one purchase adds to the buyer's balance.
+    public let credits: Int?
+    /// The access the purchase unlocks (`access:<slug>`).
+    public let unlocks: [String]
+}
+
+/// ONE CATALOG: a plan, as `subscriptions.plans()` answers it.
+public struct CatalogPlan: Sendable, Equatable {
+    /// The name `subscriptions.checkout(plan:)` takes.
+    public let name: String
+    /// The plan everyone starts on — never bought; its price is 0.
+    public let free: Bool
+    /// Minor units; the free plan's currency is the first paid plan's (nil
+    /// when none is sold) and its period is nil.
+    public let price: CatalogPrice
+    /// Credits granted each period (the free plan: each calendar month).
+    public let creditsPerPeriod: Int?
+    /// The free plan's welcome credits, granted once.
+    public let creditsOnce: Int?
+    /// The access the plan unlocks while active (`access:<slug>`).
+    public let unlocks: [String]
+}
+
+public struct CatalogPrice: Sendable, Equatable {
+    public let amountMinor: Int
+    public let currency: String?
+    /// "day", "week", "month" or "year" on a paid plan; nil on a product and the free plan.
+    public let period: String?
+}
+
 public struct PaymentSession: Sendable, Equatable {
     public let url: String
     public let product: String

@@ -292,6 +292,21 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(sent.count, 6, "one call each — nothing opens a browser, nothing polls")
     }
 
+    func testCatalogReadsWhatTheAppSells() async throws {
+        let catalog = #"{"products":[{"name":"ebook","price":{"amountMinor":500,"currency":"gbp"},"delivers":"file","credits":null,"unlocks":["access:ebook"]}],"plans":[{"name":"free","free":true,"price":{"amountMinor":0,"currency":"gbp","period":null},"credits":{"perPeriod":20,"once":50},"unlocks":[]},{"name":"pro","free":false,"price":{"amountMinor":1500,"currency":"gbp","period":"month"},"credits":null,"unlocks":["access:pro"]}]}"#
+        StubURLProtocol.queue([.init(body: Data(catalog.utf8)), .init(body: Data(catalog.utf8))])
+        let (g, _) = try client(token: nil)
+        let products = try await g.payments.products()
+        XCTAssertEqual(products, [CatalogProduct(name: "ebook", price: CatalogPrice(amountMinor: 500, currency: "gbp", period: nil), delivers: "file", credits: nil, unlocks: ["access:ebook"])])
+        let plans = try await g.subscriptions.plans()
+        XCTAssertEqual(plans.map(\.name), ["free", "pro"])
+        XCTAssertEqual(plans[0].free, true)
+        XCTAssertEqual(plans[0].creditsOnce, 50)
+        XCTAssertEqual(plans[1].price, CatalogPrice(amountMinor: 1500, currency: "gbp", period: "month"))
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent.map(\.line), ["GET /catalog", "GET /catalog"], "one public read, no sign-in")
+    }
+
     func testAccountDeleteClearsTheSession() async throws {
         StubURLProtocol.queue([.init(body: Data(#"{"deleted":true}"#.utf8))])
         let (g, store) = try client(token: "gm_sess_1")

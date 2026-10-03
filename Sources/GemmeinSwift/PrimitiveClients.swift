@@ -67,6 +67,28 @@ public final class SubscriptionsClient: @unchecked Sendable {
         return Subscription(plan: sub["plan"]?.string ?? "", status: sub["status"]?.string ?? "")
     }
 
+    /// The plans this app sells, in the order the dashboard shows them — for
+    /// a pricing page. Payments → Plans IS the list: never keep plans in a
+    /// collection. Only what can be bought right now is listed, plus the free
+    /// plan (price 0). No sign-in needed. Each plan's own words and pictures
+    /// live in your code, keyed by `name`; start a purchase with
+    /// `checkout(plan:)`.
+    // route: GET /catalog
+    public func plans() async throws -> [CatalogPlan] {
+        let body = try requireObject(try await runtimeRequest(config, "/catalog"), "the catalog")
+        return (body["plans"]?.array ?? []).compactMap { $0.object }.map { p in
+            let credits = p["credits"]?.object
+            return CatalogPlan(
+                name: p["name"]?.string ?? "",
+                free: p["free"]?.bool ?? false,
+                price: catalogPrice(p["price"]),
+                creditsPerPeriod: credits?["perPeriod"]?.int,
+                creditsOnce: credits?["once"]?.int,
+                unlocks: (p["unlocks"]?.array ?? []).compactMap { $0.string }
+            )
+        }
+    }
+
     /// Start a Stripe checkout for a plan — Gemmein mints the URL with the
     /// signed-in buyer and the plan already wired in (never build checkout
     /// URLs yourself). This RETURNS the URL and never opens it: on iOS you
@@ -86,6 +108,25 @@ public final class PaymentsClient: @unchecked Sendable {
     private let config: ClientConfig
 
     init(config: ClientConfig) { self.config = config }
+
+    /// The products this app sells, in the order the dashboard shows them —
+    /// for a storefront. Payments → Products IS the catalog: never keep
+    /// products in a collection. Only what can be bought right now is
+    /// listed. No sign-in needed. Each product's own words and pictures live
+    /// in your code, keyed by `name`; start a purchase with `buy(_:)`.
+    // route: GET /catalog
+    public func products() async throws -> [CatalogProduct] {
+        let body = try requireObject(try await runtimeRequest(config, "/catalog"), "the catalog")
+        return (body["products"]?.array ?? []).compactMap { $0.object }.map { p in
+            CatalogProduct(
+                name: p["name"]?.string ?? "",
+                price: catalogPrice(p["price"]),
+                delivers: p["delivers"]?.string ?? "none",
+                credits: p["credits"]?.int,
+                unlocks: (p["unlocks"]?.array ?? []).compactMap { $0.string }
+            )
+        }
+    }
 
     /// Buy a one-off product. RETURNS the URL and never opens it. The optional
     /// `item` note names WHAT is being bought when one product covers many
@@ -150,4 +191,10 @@ public final class StorageClient: @unchecked Sendable {
         try assertCollectionName(name)
         return CollectionClient(config: config, name: name, intent: intent)
     }
+}
+
+/// ONE CATALOG: a catalog price off the wire.
+func catalogPrice(_ value: JSONValue?) -> CatalogPrice {
+    let o = value?.object
+    return CatalogPrice(amountMinor: o?["amountMinor"]?.int ?? 0, currency: o?["currency"]?.string, period: o?["period"]?.string)
 }
