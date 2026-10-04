@@ -64,7 +64,7 @@ public final class SubscriptionsClient: @unchecked Sendable {
     public func mine() async throws -> Subscription? {
         let body = try requireObject(try await runtimeRequest(config, "/auth/subscription"), "a subscription")
         guard let sub = body["subscription"]?.object else { return nil }
-        return Subscription(plan: sub["plan"]?.string ?? "", status: sub["status"]?.string ?? "")
+        return Subscription(plan: sub["plan"]?.string ?? "", status: sub["status"]?.string ?? "", trialEndsAt: sub["trialEndsAt"]?.string, endsAt: sub["endsAt"]?.string)
     }
 
     /// The plans this app sells, in the order the dashboard shows them — for
@@ -91,7 +91,8 @@ public final class SubscriptionsClient: @unchecked Sendable {
 
     /// Start a Stripe checkout for a plan — Gemmein mints the URL with the
     /// signed-in buyer and the plan already wired in (never build checkout
-    /// URLs yourself). This RETURNS the URL and never opens it: on iOS you
+    /// URLs yourself). Plans need a signed-in user; products can be bought
+    /// signed out. This RETURNS the URL and never opens it: on iOS you
     /// decide, and the right answer is usually `ASWebAuthenticationSession` or
     /// `SFSafariViewController`. Omit `plan` to buy the app's paid plan.
     // route: GET /auth/checkout
@@ -99,6 +100,16 @@ public final class SubscriptionsClient: @unchecked Sendable {
         let query = plan.map { "?plan=\(percentEncodeComponent($0))" } ?? ""
         let body = try requireObject(try await runtimeRequest(config, "/auth/checkout\(query)"), "a checkout")
         return CheckoutSession(url: body["url"]?.string ?? "", plan: body["plan"]?.string ?? "")
+    }
+
+    /// Where the signed-in subscriber changes plan, cancels or updates their
+    /// card: the app owner's Stripe customer portal, with their email filled
+    /// in. Throws 409 `portal_not_set_up` until the owner pastes the portal
+    /// link on Payments. Open the url yourself.
+    // route: GET /auth/subscription/manage
+    public func manage() async throws -> ManageLink {
+        let body = try requireObject(try await runtimeRequest(config, "/auth/subscription/manage"), "a manage link")
+        return ManageLink(url: body["url"]?.string ?? "")
     }
 }
 
@@ -132,7 +143,12 @@ public final class PaymentsClient: @unchecked Sendable {
     /// `item` note names WHAT is being bought when one product covers many
     /// things: `buy("premium license", item: "beat_37")`. A completed payment
     /// writes a receipt record addressed to the buyer; gate downloads on that
-    /// receipt, never on the redirect coming back.
+    /// receipt, never on the redirect coming back. Products can be bought
+    /// signed out: the buyer gives Stripe Checkout their email, and the
+    /// purchase is theirs the first time they sign in with it (plans need
+    /// sign-in); only an `item` note
+    /// needs a signed-in buyer. Gemmein emails the buyer a Library link by
+    /// default.
     // route: GET /auth/pay
     public func buy(_ product: String, item: String? = nil) async throws -> PaymentSession {
         var pairs = [("product", product)]

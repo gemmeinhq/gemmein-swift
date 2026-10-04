@@ -10,6 +10,26 @@ rather than a habit, and the release check refuses a build whose version does
 not match the npm SDK's. Read the JS SDK's
 [`CHANGELOG.md`](../sdk/CHANGELOG.md) for the engine behind each release.
 
+## [Unreleased]
+
+## [0.15.0] — 2026-10-04
+
+Pinned to `@gemmein/sdk` 0.15.0 and engine 0.21.0.
+
+- `Subscription` carries `trialEndsAt` and `endsAt` (ISO times, `nil` when
+  not set); `status` is `"trialing"`, `"active"` or `"cancelled"`.
+- `subscriptions.manage()` → `ManageLink { url }`: the app owner's Stripe
+  customer portal for the signed-in subscriber — change plan, cancel, update
+  the card. Open the url yourself. Throws 409 `portal_not_set_up` until the
+  owner pastes the portal link on Payments.
+- `payments.buy()` works signed out for a product; the buyer's purchase is
+  theirs the first time they sign in with the email they gave Stripe
+  Checkout. Plans need sign-in.
+- `NotifyResult.notSent` (`"address_bounced"` / `"address_complained"`) and
+  `NotifyResult.message`: set, with `sent == false`, when the engine did not
+  mail an address that bounced for good or reported the app's mail as spam.
+  Same fields as `@gemmein/sdk`'s `notify()` result.
+
 ## [0.14.0] — 2026-10-03
 
 Pinned to `@gemmein/sdk` 0.14.0 and engine 0.20.0.

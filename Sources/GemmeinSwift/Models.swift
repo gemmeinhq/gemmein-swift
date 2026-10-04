@@ -277,8 +277,17 @@ public enum LinkIntent: String, Sendable {
 
 public struct Subscription: Sendable, Equatable {
     public let plan: String
-    /// "active" or "cancelled".
+    /// "trialing", "active" or "cancelled".
     public let status: String
+    /// ISO time the free trial ends, while trialing.
+    public var trialEndsAt: String? = nil
+    /// ISO time the subscription ends, when it is set to cancel.
+    public var endsAt: String? = nil
+}
+
+/// The app owner's Stripe customer portal for the signed-in subscriber.
+public struct ManageLink: Sendable, Equatable {
+    public let url: String
 }
 
 public struct CheckoutSession: Sendable, Equatable {
@@ -506,6 +515,13 @@ public struct NotifyResult: Sendable, Equatable {
     /// Whether a customer's reply will land in your Inbox.
     public let replyRail: Bool?
     public let recorded: Bool?
+    /// Set when nothing was sent because the address bounced for good
+    /// ("address_bounced") or its owner marked this app's mail as spam
+    /// ("address_complained"). `sent` is false; don't retry.
+    public let notSent: String?
+    /// The sentence for `notSent` ("not sent: address bounced" / "not sent:
+    /// address marked as spam").
+    public let message: String?
 
     init(json: [String: JSONValue]) {
         sent = json["sent"]?.bool ?? false
@@ -514,6 +530,8 @@ public struct NotifyResult: Sendable, Equatable {
         threadId = json["threadId"]?.string
         replyRail = json["replyRail"]?.bool
         recorded = json["recorded"]?.bool
+        notSent = json["notSent"]?.string
+        message = json["message"]?.string
     }
 }
 
