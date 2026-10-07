@@ -124,6 +124,15 @@ public final class AiClient: @unchecked Sendable {
     ///     let answer = try await g.ai.run("summarise", ["text": .string(text)], stream: true)
     ///     for try await event in answer.events() { … }
     ///
+    /// A file input is the ref an upload returned — the tool's ticks (image,
+    /// audio, video, document) decide which kinds it takes:
+    ///
+    ///     let photo = try await g.collection("photos").upload(data, name: "p.jpg", contentType: "image/jpeg")
+    ///     let answer = try await g.ai.run("describe-photo", ["photo": .string(photo.ref)])
+    ///
+    /// File refusals: `input_not_accepted` (400) · `input_too_large` (413) ·
+    /// `input_not_supported` (409) · `input_rejected` (502, nothing spent).
+    ///
     /// Refusals, all `GemmeinError`: `session_required` (401) · `ai_capped`
     /// (429, `resetAt`) · `unknown_tool` (404) · `tool_disabled` (403) ·
     /// `entitlement_required` (403 — the message names the plan it needs) ·

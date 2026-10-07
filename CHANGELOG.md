@@ -12,6 +12,23 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-10-07
+
+Pinned to `@gemmein/sdk` 0.16.0 and engine 0.22.0.
+
+- `collection(name).open(id)` → `OpenFieldsClient` with `count(field, 1 | -1)`,
+  `set(field, value)` and `flag(field, on)`, each returning the record.
+- `GemmeinRecord.mine` (your own counts and flags), `flaggedBy` (on a
+  secret-key read of one record, who set each flag) and `recipients`.
+- `ListOptions(count: true)` fills `ListResult.total` (exact up to 10,000) or
+  `totalAtLeast`; `ListOptions(author:)` takes `"me"` or a user id.
+- `create(_:key:for:published:)` and the server client's
+  `create(_:for:from:key:)` take a list of up to 20 recipients for one direct
+  record.
+- `upload()` takes audio up to 100 MB and video up to 500 MB per file (25 MB
+  and 50 MB in Development); `ai.run()` takes an upload's ref as a file input
+  for the kinds the tool ticks.
+
 ## [0.15.0] — 2026-10-04
 
 Pinned to `@gemmein/sdk` 0.15.0 and engine 0.21.0.

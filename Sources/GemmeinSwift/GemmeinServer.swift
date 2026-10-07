@@ -318,6 +318,23 @@ public final class ServerCollectionClient: @unchecked Sendable {
         return GemmeinRecord(json: try requireObject(body, "a record"))
     }
 
+    /// MANY RECIPIENTS: a direct record `from:` its author to up to 20 people
+    /// at once — one record every named person reads.
+    // route: POST /storage/{collection}
+    @discardableResult
+    public func create(
+        _ data: [String: JSONValue],
+        for recipients: [String],
+        from author: String? = nil,
+        key: String? = nil
+    ) async throws -> GemmeinRecord {
+        var pairs: [(String, String)] = [("for", recipients.joined(separator: ","))]
+        if let author { pairs.append(("from", author)) }
+        if let key { pairs.append(("key", key)) }
+        let body = try await request("?\(formURLEncode(pairs))", method: "POST", body: try JSONCodec.encode(data))
+        return GemmeinRecord(json: try requireObject(body, "a record"))
+    }
+
     /// Delete any record in a collection this key may DELETE — its own tick at
     /// mint (or a full key); a key without it is `scope_denied`.
     // route: DELETE /storage/{collection}/{id}

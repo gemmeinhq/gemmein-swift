@@ -174,12 +174,14 @@ final class WireTests: XCTestCase {
             cursor: "cur_1",
             search: "hello world",
             expand: ["authorId", "albumId"],
-            since: "2026-09-01T00:00:00.000Z"
+            since: "2026-09-01T00:00:00.000Z",
+            count: true,
+            author: "me"
         ))
 
         XCTAssertEqual(
             StubURLProtocol.captured[0].line,
-            "GET /storage/notes?limit=25&sort=updated&where=%7B%22done%22%3Afalse%7D&cursor=cur_1&search=hello+world&expand=authorId%2CalbumId&since=2026-09-01T00%3A00%3A00.000Z"
+            "GET /storage/notes?limit=25&sort=updated&where=%7B%22done%22%3Afalse%7D&cursor=cur_1&search=hello+world&expand=authorId%2CalbumId&since=2026-09-01T00%3A00%3A00.000Z&count=true&author=me"
         )
     }
 

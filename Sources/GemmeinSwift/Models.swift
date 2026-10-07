@@ -43,6 +43,15 @@ public struct GemmeinRecord: Sendable, Equatable {
     /// Present (true) only when a keyed create was YOUR OWN retry — you got
     /// the record you already made.
     public let existing: Bool?
+    /// OPEN FIELDS: YOUR own marks — for each "count once per person" field,
+    /// whether you counted it; for each "per person flag", your yes/no.
+    public let mine: [String: Bool]
+    /// OPEN FIELDS: on a secret-key read of one record, who set each
+    /// "per person flag" (first 100).
+    public let flaggedBy: [String: [String]]
+    /// MANY RECIPIENTS: everyone a direct record was sent to, in order, when
+    /// it named more than one.
+    public let recipients: [String]?
 
     init(json: [String: JSONValue]) {
         id = json["id"]?.string ?? ""
@@ -67,6 +76,9 @@ public struct GemmeinRecord: Sendable, Equatable {
         }
         expand = expanded
         existing = json["existing"]?.bool
+        mine = (json["mine"]?.object ?? [:]).compactMapValues { $0.bool }
+        flaggedBy = (json["flaggedBy"]?.object ?? [:]).mapValues { ($0.array ?? []).compactMap { $0.string } }
+        recipients = json["recipients"]?.array?.compactMap { $0.string }
     }
 }
 
@@ -83,6 +95,11 @@ public struct ListResult: Sendable, Equatable {
     /// clock, so a change can be delivered twice but never silently missed —
     /// apply records by id.
     public let watermark: String?
+    /// With `ListOptions(count: true)`: how many records the filters admit,
+    /// exact up to 10,000. nil when not asked, or when `totalAtLeast` is set.
+    public let total: Int?
+    /// With `ListOptions(count: true)`, past 10,000: show "10,000+".
+    public let totalAtLeast: Int?
 
     init(json: [String: JSONValue]) {
         records = (json["records"]?.array ?? []).compactMap { $0.object.map { GemmeinRecord(json: $0) } }
@@ -90,6 +107,8 @@ public struct ListResult: Sendable, Equatable {
         hasMore = json["hasMore"]?.bool ?? false
         deleted = (json["deleted"]?.array ?? []).compactMap { $0.string }
         watermark = json["watermark"]?.string
+        total = json["total"]?.int
+        totalAtLeast = json["totalAtLeast"]?.int
     }
 }
 
@@ -117,6 +136,12 @@ public struct ListOptions: Sendable {
     /// Everything changed OR deleted after this instant, oldest change first.
     /// Pass the `watermark` from the previous answer. Incompatible with `sort`.
     public var since: String?
+    /// Add the total to the answer (`total`, or `totalAtLeast` past 10,000) —
+    /// same rule, filters and search as the page. Not with `since`.
+    public var count: Bool
+    /// Only records written by this person: "me" or a user id. Shared,
+    /// community, public_read, direct only (403 author_not_visible elsewhere).
+    public var author: String?
 
     public init(
         limit: Int? = nil,
@@ -125,7 +150,9 @@ public struct ListOptions: Sendable {
         cursor: String? = nil,
         search: String? = nil,
         expand: [String]? = nil,
-        since: String? = nil
+        since: String? = nil,
+        count: Bool = false,
+        author: String? = nil
     ) {
         self.limit = limit
         self.sort = sort
@@ -134,6 +161,8 @@ public struct ListOptions: Sendable {
         self.search = search
         self.expand = expand
         self.since = since
+        self.count = count
+        self.author = author
     }
 
     /// The query string, exactly as the JS SDK writes it.
@@ -146,6 +175,8 @@ public struct ListOptions: Sendable {
         if let search { pairs.append(("search", search)) }
         if let expand, !expand.isEmpty { pairs.append(("expand", expand.joined(separator: ","))) }
         if let since { pairs.append(("since", since)) }
+        if count { pairs.append(("count", "true")) }
+        if let author { pairs.append(("author", author)) }
         return pairs
     }
 }

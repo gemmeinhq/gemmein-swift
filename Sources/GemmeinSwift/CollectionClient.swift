@@ -95,6 +95,24 @@ public final class CollectionClient: @unchecked Sendable {
         return GemmeinRecord(json: try requireObject(body, "a record"))
     }
 
+    /// MANY RECIPIENTS: one direct record every named person reads (up to 20;
+    /// only you edit it). One id is `create(data, for: id)`.
+    // route: POST /storage/{collection}
+    @discardableResult
+    public func create(
+        _ data: [String: JSONValue],
+        key: String? = nil,
+        for recipients: [String],
+        published: Bool? = nil
+    ) async throws -> GemmeinRecord {
+        var pairs: [(String, String)] = []
+        if let key { pairs.append(("key", key)) }
+        pairs.append(("for", recipients.joined(separator: ",")))
+        if let published { pairs.append(("published", published ? "true" : "false")) }
+        let body = try await request("?\(formURLEncode(pairs))", method: "POST", body: try JSONCodec.encode(data))
+        return GemmeinRecord(json: try requireObject(body, "a record"))
+    }
+
     /// List records this person is allowed to see under the collection's
     /// safety rule — the app's owner signed in to the app included (an
     /// ordinary customer; the dashboard is where the owner sees everyone's).
@@ -240,6 +258,17 @@ public final class CollectionClient: @unchecked Sendable {
         _ = try await request("/\(percentEncodeComponent(id))", method: "DELETE")
     }
 
+    /// OPEN FIELDS — the fields this collection's config lets any signed-in
+    /// reader change, each by its one operation:
+    ///
+    ///     try await g.collection("posts").open(post.id).count("likes", 1)     // like, once per person
+    ///     try await g.collection("invites").open(id).set("status", "accepted") // one of a fixed list
+    ///     try await g.collection("notices").open(id).flag("read", true)        // your own flag
+    // route: none
+    public func open(_ id: String) -> OpenFieldsClient {
+        OpenFieldsClient(id: id, send: { [self] suffix, method, body in try await self.request(suffix, method: method, body: body) })
+    }
+
     /// Upload a file and get back a REFERENCE — `file:<uuid>` — not a URL.
     ///
     /// Store the reference. It never expires, it is safe to log and export,
@@ -251,7 +280,9 @@ public final class CollectionClient: @unchecked Sendable {
     ///     try await g.collection("films").create(["title": "Ran", "poster": .string(file.ref)])
     ///
     /// Images (JPEG/PNG/WebP/GIF/HEIC) and documents (PDF/ZIP/EPUB), 25 MB per
-    /// file. A document always downloads — link it with `intent: .download`.
+    /// file; audio (mp3/m4a/wav/webm/ogg/flac/aac) 100 MB and video
+    /// (mp4/webm/mov) 500 MB (25/50 MB in Development), which play inline.
+    /// A document always downloads — link it with `intent: .download`.
     /// `for:` names ONE other person who may read this file (addressed and
     /// direct collections only). There is deliberately no `url` here: a URL
     /// that outlives a refund is the bug this replaced.
@@ -376,5 +407,43 @@ final class WatchState: @unchecked Sendable {
             wake = false
             return value
         }
+    }
+}
+
+/// OPEN FIELDS on one record — from `collection(name).open(id)`.
+public final class OpenFieldsClient: @unchecked Sendable {
+    private let id: String
+    private let send: @Sendable (String, String, Data?) async throws -> JSONValue?
+
+    init(id: String, send: @escaping @Sendable (String, String, Data?) async throws -> JSONValue?) {
+        self.id = id
+        self.send = send
+    }
+
+    /// A "count once per person" field: `1` adds your one (again is a no-op),
+    /// `-1` takes it back. Never below 0.
+    // route: POST /storage/{collection}/{id}/open
+    @discardableResult
+    public func count(_ field: String, _ step: Int) async throws -> GemmeinRecord {
+        try await change(["field": .string(field), "count": .int(step)])
+    }
+
+    /// A "one of" field: one of the choices its config lists.
+    // route: POST /storage/{collection}/{id}/open
+    @discardableResult
+    public func set(_ field: String, _ value: String) async throws -> GemmeinRecord {
+        try await change(["field": .string(field), "set": .string(value)])
+    }
+
+    /// A "per person flag": your own yes/no on this record.
+    // route: POST /storage/{collection}/{id}/open
+    @discardableResult
+    public func flag(_ field: String, _ on: Bool) async throws -> GemmeinRecord {
+        try await change(["field": .string(field), "flag": .bool(on)])
+    }
+
+    private func change(_ body: [String: JSONValue]) async throws -> GemmeinRecord {
+        let answer = try await send("/\(percentEncodeComponent(id))/open", "POST", try JSONCodec.encode(body))
+        return GemmeinRecord(json: try requireObject(answer, "a record"))
     }
 }
