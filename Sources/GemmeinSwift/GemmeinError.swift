@@ -14,16 +14,22 @@ public struct GemmeinError: Error, Sendable, Equatable {
     public let message: String
     /// Present on 429 — when the limit resets; wait until then and retry.
     public let resetAt: String?
+    /// Present on `429 export_rate_limited` from `account.export()` when the
+    /// 30-day window refused it: the address the person can reach the app's
+    /// owner at to ask for their data (the app's support inbox address). Nil
+    /// when the app has none — show "contact the app's owner" then.
+    public let ownerContact: String?
     /// Present on `403 entitlement_required` — the plan's or product's own key
     /// (`access:<slug>`). Show your upgrade screen and send the customer to
     /// checkout. A collection unlocked by several plans names ONE key here.
     public let requires: String?
 
-    public init(status: Int, code: String, message: String, resetAt: String? = nil, requires: String? = nil) {
+    public init(status: Int, code: String, message: String, resetAt: String? = nil, ownerContact: String? = nil, requires: String? = nil) {
         self.status = status
         self.code = code
         self.message = message
         self.resetAt = resetAt
+        self.ownerContact = ownerContact
         self.requires = requires
     }
 }
@@ -51,6 +57,7 @@ func readErrorBody(_ data: Data, status: Int) -> GemmeinError {
         // Copied only when the server sent it as a string — never invented
         // here, and nothing else from the body becomes SDK surface.
         resetAt: body["resetAt"]?.string,
+        ownerContact: body["ownerContact"]?.string,
         requires: body["requires"]?.string
     )
 }

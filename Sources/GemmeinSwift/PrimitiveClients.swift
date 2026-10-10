@@ -177,6 +177,25 @@ public final class AccountClient: @unchecked Sendable {
         await config.tokenStore.clear()
         return answer
     }
+
+    /// Self-service data export — the "download my data" button (GDPR right
+    /// of access and portability). Returns ONE JSON document of everything
+    /// this person holds in the app: their profile, every record they wrote
+    /// or that names them (grouped by collection), their files as download
+    /// links that expire in minutes, purchases, subscription, credits and
+    /// their ledger, access grants, AI calls and runs, emails the app sent
+    /// them, sessions and sign-ins. It holds what the person may read under
+    /// the app's rules — nothing another person keeps private. Once every
+    /// 30 days, counted from the last export; another inside that window throws
+    /// `export_rate_limited` (429) with `resetAt` and a sentence giving the
+    /// date. (The owner's dashboard export counts separately, once a day.)
+    ///
+    ///     let export = try await g.account.export()
+    ///     let bytes = try export.jsonData()   // hand these to a share sheet
+    // route: GET /auth/export-account
+    public func export() async throws -> AccountExport {
+        AccountExport(json: try requireObject(try await runtimeRequest(config, "/auth/export-account"), "an account export"))
+    }
 }
 
 /// The signed-in person's own credits — so an app can draw its own meter.

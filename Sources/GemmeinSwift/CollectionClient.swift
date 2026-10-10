@@ -294,10 +294,31 @@ public final class CollectionClient: @unchecked Sendable {
         contentType: String = "",
         for recipient: String? = nil
     ) async throws -> UploadedFile {
+        try await upload(data, name: name, contentType: contentType, forValue: recipient)
+    }
+
+    /// GROUP CHATS: `for: [id, id, …]` on a direct collection names up to 20
+    /// people — the same list `create(data, for: [ids])` takes. Upload the
+    /// attachment with the group's ids, put the ref in the group message, and
+    /// every person named (and you) can link it; everyone else is refused.
+    /// More than 20 is `too_many_recipients`; a list on any other rule is
+    /// `invalid_recipients`. One id is `upload(data, for: id)`.
+    // route: POST /storage/{collection}/upload
+    // route: POST /storage/{collection}/upload/{fileId}/confirm
+    public func upload(
+        _ data: Data,
+        name: String = "upload",
+        contentType: String = "",
+        for recipients: [String]
+    ) async throws -> UploadedFile {
+        try await upload(data, name: name, contentType: contentType, forValue: recipients)
+    }
+
+    private func upload(_ data: Data, name: String, contentType: String, forValue: Any?) async throws -> UploadedFile {
         // Step 1: the presign. The server refuses a presign that declares
         // nothing — it cannot accept an empty file.
         var presignFields: [String: Any] = ["name": name, "size": data.count, "contentType": contentType]
-        if let recipient { presignFields["for"] = recipient }
+        if let forValue { presignFields["for"] = forValue }
         let presign = try requireObject(
             try await request("/upload", method: "POST", body: try JSONCodec.encode(presignFields)),
             "an upload"

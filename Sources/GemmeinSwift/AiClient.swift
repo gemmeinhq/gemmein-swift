@@ -210,8 +210,8 @@ public final class AiClient: @unchecked Sendable {
     }
 
     /// The signed-in person's OWN AI calls, newest first — what they ran,
-    /// when, what it cost, how it ended; the prompt and answer only where the
-    /// tool keeps them. Session required.
+    /// when, what it cost, how it ended; the answer only where the
+    /// tool keeps it. Session required.
     // route: GET /auth/ai-calls
     public func calls(limit: Int? = nil, before: String? = nil) async throws -> AiCallPage {
         var pairs: [(String, String)] = []

@@ -250,6 +250,39 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(sent[2].line, "POST /storage/films/upload/file_1/confirm")
     }
 
+    func testUploadForAGroupSendsTheListTheJSSDKSends() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"fileId":"file_2","uploadUrl":"http://api.test/dev-upload?key=k","fields":{}}"#.utf8)),
+            .init(status: 204, headers: [:], body: Data()),
+            .init(body: Data(#"{"id":"file_2","ref":"file:02K","contentType":"image/png","sizeBytes":4}"#.utf8))
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        let uploaded = try await g.collection("chat").upload(Data([1, 2, 3, 4]), name: "a.png", contentType: "image/png", for: ["usr_2", "usr_3"])
+        XCTAssertEqual(uploaded.ref, "file:02K")
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "POST /storage/chat/upload")
+        XCTAssertEqual(
+            sent[0].json as NSDictionary?,
+            ["name": "a.png", "size": 4, "contentType": "image/png", "for": ["usr_2", "usr_3"]] as NSDictionary,
+            "a group upload names every reader as a JSON array, the shape `upload(file, { for: [ids] })` sends"
+        )
+        XCTAssertEqual(sent[2].line, "POST /storage/chat/upload/file_2/confirm")
+    }
+
+    func testUploadWithoutForSendsNoForKey() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"fileId":"file_3","uploadUrl":"http://api.test/dev-upload?key=k","fields":{}}"#.utf8)),
+            .init(status: 204, headers: [:], body: Data()),
+            .init(body: Data(#"{"id":"file_3","ref":"file:03K","contentType":"image/png","sizeBytes":1}"#.utf8))
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        _ = try await g.collection("films").upload(Data([1]), name: "a.png", contentType: "image/png")
+        XCTAssertEqual(
+            StubURLProtocol.captured[0].json as NSDictionary?,
+            ["name": "a.png", "size": 1, "contentType": "image/png"] as NSDictionary
+        )
+    }
+
     // ── the other primitives ─────────────────────────────────────────────
 
     func testFilesLinkSubscriptionsPaymentsCreditsAndPurchases() async throws {
@@ -318,6 +351,107 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.captured[0].line, "POST /auth/delete-account")
     }
 
+    /// A whole export as apps/api/src/personExport.ts builds it: every
+    /// section, `support`, a private file with `urlExpiresAt` and a public
+    /// one without, and `limits` with its caps, budget and `truncated`.
+    static let fullExport = #"""
+    {"exportVersion":1,
+     "about":{"what":"A copy of the personal data Basket holds about this person, as one JSON document.","app":"Basket","generatedAt":"2026-10-09T10:00:00.000Z","door":"self","producedBy":"The person's own export from inside the app.","sections":["person","records"],"limits":"Each section has a cap; see limits.","notIncluded":[{"what":"Other people's data","why":"The export holds only what this person may read in the app."}],"termsUrl":null,"ownerContact":"hello@basket.example","rights":"You can ask the app's owner to correct or delete your data."},
+     "exportedAt":"2026-10-09T10:00:00.000Z",
+     "app":{"appId":"app_1","environmentId":"env_1"},
+     "person":{"id":"usr_1","email":"maya@b.co","createdAt":"2026-09-01T09:00:00.000Z","lastSignInAt":"2026-10-09T09:59:00.000Z","suspendedAt":null,"invitedAt":null},
+     "records":{"dms":[{"id":"rec_1","relation":"author","data":{"text":"hi ben"},"to":"usr_2","createdAt":"2026-10-01T10:00:00.000Z","updatedAt":"2026-10-01T10:00:00.000Z"},
+                       {"id":"rec_2","relation":"recipient","data":{"text":"group"},"recipients":["usr_1","usr_2"],"from":"usr_3","createdAt":"2026-10-02T10:00:00.000Z","updatedAt":"2026-10-02T10:00:00.000Z"}]},
+     "recordCount":2,
+     "marks":[{"recordId":"rec_2","field":"likes","createdAt":"2026-10-02T11:00:00.000Z"}],
+     "files":[{"ref":"file:aaa","collection":"notes","relation":"uploader","name":"cv.pdf","contentType":"application/pdf","sizeBytes":1024,"createdAt":"2026-10-03T10:00:00.000Z","url":"https://files.example/aaa?sig=1","urlExpiresAt":"2026-10-09T10:05:00.000Z"},
+              {"ref":"file:bbb","collection":"gallery","relation":"reader","name":null,"contentType":"image/png","sizeBytes":null,"createdAt":"2026-10-03T11:00:00.000Z","url":"https://cdn.example/bbb.png"}],
+     "purchases":[{"item":"Pro","kind":"subscription","paymentRef":"pi_1","amountMinor":1500,"currency":"gbp","refundedMinor":500,"status":"part_refunded","grants":["access:pro"],"paidAt":"2026-09-02T10:00:00.000Z"}],
+     "subscription":{"plan":"Pro","status":"active","since":"2026-09-02T10:00:00.000Z","lastEventAt":null},
+     "credits":{"balance":{"balance":12,"reserved":3,"expiring":{"credits":5,"at":"2026-11-01T00:00:00.000Z"}},
+                "grants":[{"id":"cg_1","amount":20,"remaining":12,"source":"comp","expiresAt":"2026-11-01T00:00:00.000Z","expiredAt":null,"createdAt":"2026-09-03T10:00:00.000Z"}],
+                "reservations":[{"id":"cr_1","amount":3,"consumed":null,"status":"open","expiresAt":"2026-10-09T10:10:00.000Z","createdAt":"2026-10-09T09:58:00.000Z","closedAt":null}],
+                "ledger":[{"id":"ce_1","kind":"grant","delta":20,"balanceAfter":20,"sourceType":"comp","createdAt":"2026-09-03T10:00:00.000Z"}]},
+     "access":[{"id":"ent_1","kind":"access","ref":"access:pro","sourceType":"subscription","startsAt":"2026-09-02T10:00:00.000Z","expiresAt":null,"revokedAt":null,"createdAt":"2026-09-02T10:00:00.000Z"}],
+     "aiCalls":[{"id":"aic_1","tool":"summarise","kind":"chat","provider":"openai","model":"gpt-4o-mini","tokensIn":120,"tokensOut":40,"credits":1,"outcome":"ok","refusalCode":null,"latencyMs":800,"answer":"A short summary.","units":"call","unitCount":1,"createdAt":"2026-10-05T10:00:00.000Z"}],
+     "runs":[{"id":"run_1","tool":"poster","kind":"generate","status":"succeeded","progress":100,"key":null,"reserved":5,"held":0,"charged":4,"units":"images","unitCount":1,"result":{"files":[],"text":null},"data":null,"error":null,"createdAt":"2026-10-06T10:00:00.000Z","updatedAt":"2026-10-06T10:01:00.000Z","endedAt":"2026-10-06T10:01:00.000Z","handoff":null}],
+     "emails":[{"id":"ns_1","kind":"notify","sentTo":"maya@b.co","sentAt":"2026-10-07T10:00:00.000Z","skippedReason":null}],
+     "support":[{"subject":"Refund?","startedAt":"2026-10-08T10:00:00.000Z","lastMessageAt":"2026-10-08T12:00:00.000Z",
+                 "messages":[{"direction":"from_person","subject":"Refund?","text":"Can I get a refund?","attachments":["receipt.pdf"],"at":"2026-10-08T10:00:00.000Z"},
+                             {"direction":"to_person","subject":"Re: Refund?","text":"Done.","attachments":[],"at":"2026-10-08T12:00:00.000Z"}]}],
+     "sessions":[{"id":"ses_1","createdAt":"2026-10-09T09:59:00.000Z","expiresAt":"2026-11-08T09:59:00.000Z","revokedAt":null}],
+     "signIns":[{"event":"email_verify","at":"2026-10-09T09:59:00.000Z","allowed":true,"ip":"203.0.113.9"}],
+     "limits":{"caps":{"records":5000,"files":1000,"marks":1000,"purchases":1000,"aiCalls":1000,"runs":199,"creditLedger":199,"emails":99,"sessions":500,"signIns":500,"support":200},
+               "textBudgetBytes":26214400,"truncated":["records","support"]}}
+    """#
+
+    func testAccountExportTypesTheWholeDocument() async throws {
+        StubURLProtocol.queue([.init(body: Data(Self.fullExport.utf8))])
+        let (g, _) = try client(token: "gm_sess_1")
+        let export = try await g.account.export()
+        let sent = StubURLProtocol.captured[0]
+        XCTAssertEqual(sent.line, "GET /auth/export-account")
+        assertBaseHeaders(sent, session: "gm_sess_1")
+        // The fixture is the whole document: its keys are the typed keys.
+        XCTAssertEqual(Set(export.document.keys), Set(AccountExport.keys), "the fixture names every section AccountExport types, and no other")
+        XCTAssertEqual(Set(export.document["limits"]?.object?["caps"]?.object.map { Array($0.keys) } ?? []), Set(AccountExport.Limits.Caps.keys))
+        XCTAssertEqual(export.exportVersion, 1)
+        XCTAssertEqual(export.about.app, "Basket")
+        XCTAssertEqual(export.about.door, "self")
+        XCTAssertEqual(export.about.notIncluded.map(\.what), ["Other people's data"])
+        XCTAssertNil(export.about.termsUrl)
+        XCTAssertEqual(export.about.ownerContact, "hello@basket.example")
+        XCTAssertEqual(export.about.rights, "You can ask the app's owner to correct or delete your data.")
+        XCTAssertEqual(export.exportedAt, "2026-10-09T10:00:00.000Z")
+        XCTAssertEqual(export.app, .init(appId: "app_1", environmentId: "env_1"))
+        XCTAssertEqual(export.person, .init(id: "usr_1", email: "maya@b.co", createdAt: "2026-09-01T09:00:00.000Z", lastSignInAt: "2026-10-09T09:59:00.000Z", suspendedAt: nil, invitedAt: nil))
+        let dms = try XCTUnwrap(export.records["dms"])
+        XCTAssertEqual(dms.map(\.relation), ["author", "recipient"])
+        XCTAssertEqual(dms[0].to, "usr_2")
+        XCTAssertEqual(dms[0].data["text"]?.string, "hi ben")
+        XCTAssertEqual(dms[1].recipients, ["usr_1", "usr_2"])
+        XCTAssertEqual(dms[1].from, "usr_3")
+        XCTAssertEqual(export.recordCount, 2)
+        XCTAssertEqual(export.marks, [.init(recordId: "rec_2", field: "likes", createdAt: "2026-10-02T11:00:00.000Z")])
+        XCTAssertEqual(export.files.map(\.urlExpiresAt), ["2026-10-09T10:05:00.000Z", nil], "a private file's link expires; a public file's has no urlExpiresAt")
+        XCTAssertEqual(export.files[1].relation, "reader")
+        XCTAssertNil(export.files[1].sizeBytes)
+        XCTAssertEqual(export.purchases, [.init(item: "Pro", kind: "subscription", paymentRef: "pi_1", amountMinor: 1500, currency: "gbp", refundedMinor: 500, status: "part_refunded", grants: ["access:pro"], paidAt: "2026-09-02T10:00:00.000Z")])
+        XCTAssertEqual(export.subscription, .init(plan: "Pro", status: "active", since: "2026-09-02T10:00:00.000Z", lastEventAt: nil))
+        XCTAssertEqual(export.credits.balance, .init(balance: 12, reserved: 3, expiringCredits: 5, expiringAt: "2026-11-01T00:00:00.000Z"))
+        XCTAssertEqual(export.credits.grants.first?.remaining, 12)
+        XCTAssertEqual(export.credits.reservations.first?.status, "open")
+        XCTAssertEqual(export.credits.ledger.first?.balanceAfter, 20)
+        XCTAssertEqual(export.access.first?.ref, "access:pro")
+        XCTAssertEqual(export.aiCalls.first?.answer, "A short summary.")
+        XCTAssertEqual(export.aiCalls.first?.units, "call")
+        XCTAssertEqual(export.runs.first?.status, .succeeded)
+        XCTAssertEqual(export.runs.first?.charged, 4)
+        XCTAssertEqual(export.emails, [.init(id: "ns_1", kind: "notify", sentTo: "maya@b.co", sentAt: "2026-10-07T10:00:00.000Z", skippedReason: nil)])
+        XCTAssertEqual(export.support.count, 1)
+        XCTAssertEqual(export.support[0].messages.map(\.direction), ["from_person", "to_person"])
+        XCTAssertEqual(export.support[0].messages[0].attachments, ["receipt.pdf"])
+        XCTAssertEqual(export.sessions.first?.expiresAt, "2026-11-08T09:59:00.000Z")
+        XCTAssertEqual(export.signIns, [.init(event: "email_verify", at: "2026-10-09T09:59:00.000Z", allowed: true, ip: "203.0.113.9")])
+        XCTAssertEqual(export.limits.caps, .init(records: 5000, files: 1000, marks: 1000, purchases: 1000, aiCalls: 1000, runs: 199, creditLedger: 199, emails: 99, sessions: 500, signIns: 500, support: 200))
+        XCTAssertEqual(export.limits.textBudgetBytes, 26_214_400)
+        XCTAssertEqual(export.limits.truncated, ["records", "support"], "an app is told which sections were cut")
+        XCTAssertFalse(try export.jsonData().isEmpty)
+    }
+
+    func testAccountExportRateLimitIsATypedError() async throws {
+        StubURLProtocol.queue([.init(status: 429, body: Data(#"{"code":"export_rate_limited","message":"data export limit: a person can export their own data once every 30 days — the next export is possible on 8 November 2026 at 11:00 UTC","resetAt":"2026-11-08T11:00:00.000Z","ownerContact":"hello@basket.example"}"#.utf8))])
+        let (g, _) = try client(token: "gm_sess_1")
+        do {
+            _ = try await g.account.export()
+            XCTFail("a 429 must throw")
+        } catch let error as GemmeinError {
+            XCTAssertEqual(error.status, 429)
+            XCTAssertEqual(error.code, "export_rate_limited")
+            XCTAssertEqual(error.ownerContact, "hello@basket.example", "the person is told where to ask the app's owner")
+        }
+    }
+
     // ── the AI route ─────────────────────────────────────────────────────
 
     func testChatSendsTheProvidersOwnBodyWithTheProviderAndToolTheJSSDKSends() async throws {
@@ -372,6 +506,88 @@ final class WireTests: XCTestCase {
         let sent = StubURLProtocol.captured
         XCTAssertEqual(sent[0].json as NSDictionary?, ["inputs": ["text": "x"], "stream": true] as NSDictionary)
         XCTAssertEqual(sent[1].line, "GET /auth/ai-calls?limit=20&before=aic_9")
+    }
+
+    // ── runs ─────────────────────────────────────────────────────────────
+
+    static let queuedRun = #"{"run":{"id":"run_1","tool":"poster","kind":"generate","status":"queued","progress":null,"key":"k1","reserved":12,"held":12,"charged":null,"units":"images","unitCount":null,"result":null,"data":null,"error":null,"createdAt":"t0","updatedAt":"t0","endedAt":null,"handoff":null}}"#
+    static let runningRun = #"{"run":{"id":"run_1","tool":"poster","kind":"generate","status":"running","progress":40,"reserved":12,"held":12,"units":"images","createdAt":"t0","updatedAt":"t1"}}"#
+    static let doneRun = #"{"run":{"id":"run_1","tool":"poster","kind":"generate","status":"succeeded","progress":100,"reserved":12,"held":0,"charged":9,"units":"images","unitCount":1,"result":{"files":[{"ref":"file:1","contentType":"image/png","sizeBytes":2048,"url":"https://cdn.test/1","urlExpiresAt":"t9"}],"text":null},"data":{"seed":7},"error":null,"createdAt":"t0","updatedAt":"t2","endedAt":"t2","handoff":{"attempts":1,"acknowledgedAt":"t0","lastError":null}}}"#
+
+    func testRunsStartGetListAndCancelWriteTheSameRequestsAsTheJSSDK() async throws {
+        StubURLProtocol.queue([
+            .init(status: 202, body: Data(Self.queuedRun.utf8)),
+            .init(body: Data(Self.doneRun.utf8)),
+            .init(body: Data(#"{"runs":[{"id":"run_1","status":"queued","updatedAt":"t0"}]}"#.utf8)),
+            .init(body: Data(Self.queuedRun.utf8)),
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        let run = try await g.runs.start("poster", inputs: ["prompt": "a lighthouse"], key: "k1")
+        XCTAssertEqual(run.status, .queued)
+        XCTAssertEqual(run.reserved, 12)
+        XCTAssertNil(run.charged)
+        let done = try await g.runs.get("run_1")
+        XCTAssertEqual(done.status, .succeeded)
+        XCTAssertEqual(done.charged, 9)
+        XCTAssertEqual(done.result?.files.first?.url, "https://cdn.test/1")
+        XCTAssertEqual(done.data, .object(["seed": .int(7)]))
+        XCTAssertEqual(done.handoff?.attempts, 1)
+        let runs = try await g.runs.list(since: "2026-10-01T00:00:00.000Z", limit: 50)
+        XCTAssertEqual(runs.map(\.id), ["run_1"])
+        _ = try await g.runs.cancel("run 1")
+
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "POST /ai/run/poster")
+        XCTAssertEqual(sent[0].json as NSDictionary?, ["inputs": ["prompt": "a lighthouse"], "key": "k1"] as NSDictionary)
+        XCTAssertEqual(sent[1].line, "GET /runs/run_1")
+        XCTAssertEqual(sent[2].line, "GET /runs?since=2026-10-01T00%3A00%3A00.000Z&limit=50")
+        XCTAssertEqual(sent[3].line, "POST /runs/run%201/cancel")
+        for captured in sent { assertBaseHeaders(captured, session: "gm_sess_1") }
+    }
+
+    func testRunsStartWithoutAKeySendsOnlyTheInputsAndARefusalIsTyped() async throws {
+        StubURLProtocol.queue([
+            .init(status: 429, body: Data(#"{"code":"runs_capped","message":"10 runs are open"}"#.utf8))
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        do {
+            _ = try await g.runs.start("poster")
+            XCTFail("a 429 throws")
+        } catch let error as GemmeinError {
+            XCTAssertEqual(error.status, 429)
+            XCTAssertEqual(error.code, "runs_capped")
+        }
+        XCTAssertEqual(StubURLProtocol.captured[0].json as NSDictionary?, ["inputs": [:] as [String: Any]] as NSDictionary)
+    }
+
+    func testRunsWatchPollsToTheEndAndCallsOnUpdateOnlyWhenUpdatedAtMoves() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(Self.queuedRun.utf8)),
+            .init(body: Data(Self.queuedRun.utf8)),
+            .init(body: Data(Self.runningRun.utf8)),
+            .init(body: Data(Self.doneRun.utf8)),
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        let seen = UpdateLog()
+        let done = try await g.runs.watch("run_1", intervalMs: 1) { seen.append($0.updatedAt) }
+        XCTAssertEqual(done.status, .succeeded)
+        XCTAssertEqual(seen.values, ["t0", "t1", "t2"], "an answer whose updatedAt did not move is not an update")
+        XCTAssertEqual(StubURLProtocol.captured.map(\.line), Array(repeating: "GET /runs/run_1", count: 4))
+    }
+
+    func testRunsWatchCancelledIsAbortedWithStatusZero() async throws {
+        StubURLProtocol.queue([.init(body: Data(Self.queuedRun.utf8))])
+        let (g, _) = try client(token: "gm_sess_1")
+        let task = Task { try await g.runs.watch("run_1", intervalMs: 5_000) }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("a cancelled watch throws")
+        } catch let error as GemmeinError {
+            XCTAssertEqual(error.status, 0)
+            XCTAssertEqual(error.code, "aborted")
+        }
     }
 
     func testAStreamingAnswerArrivesAsTheChunksTheEngineWrote() async throws {
@@ -709,4 +925,13 @@ final class RefusingTokenStore: TokenStore, @unchecked Sendable {
     }
 
     func clear() async {}
+}
+
+/// What `onUpdate` saw, in order — a `@Sendable` closure cannot mutate a
+/// captured local.
+final class UpdateLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [String] = []
+    func append(_ value: String) { lock.withLock { _values.append(value) } }
+    var values: [String] { lock.withLock { _values } }
 }

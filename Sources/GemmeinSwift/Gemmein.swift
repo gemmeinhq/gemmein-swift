@@ -7,7 +7,7 @@ import Foundation
 ///  - Business primitives Gemmein runs for you: `g.auth` (sign-in),
 ///    `g.subscriptions` (who's on which plan), `g.payments` (one-off
 ///    purchases), `g.purchases` (what they bought), `g.account` (the user's
-///    own account), `g.files`, `g.credits`, `g.ai`. These are SELF-SERVICE
+///    own account), `g.files`, `g.credits`, `g.ai`, `g.runs`. These are SELF-SERVICE
 ///    surfaces for the signed-in person — reads and hand-offs, never admin
 ///    powers. Managing other people's users, subscriptions or records happens
 ///    in the owner's dashboard (app.gemmein.com), on purpose.
@@ -26,6 +26,9 @@ public final class Gemmein: @unchecked Sendable {
     public let credits: CreditsClient
     /// The AI route: OpenAI / Anthropic / Google on the owner's key.
     public let ai: AiClient
+    /// The person's runs on job tools (generate · transcribe): start, watch,
+    /// read and cancel.
+    public let runs: RunsClient
 
     /// Where the session lives. On Apple platforms the default is the
     /// Keychain, so a relaunch keeps the person signed in.
@@ -82,6 +85,7 @@ public final class Gemmein: @unchecked Sendable {
         self.files = FilesClient(config: config)
         self.credits = CreditsClient(config: config)
         self.ai = AiClient(config: config)
+        self.runs = RunsClient(config: config)
     }
 
     /// Your app's data — `g.collection("notes")`. The canonical spelling;

@@ -12,6 +12,33 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-10-10
+
+Pinned to `@gemmein/sdk` 0.17.0 and engine 0.22.1.
+
+- `AiCallRecord.prompt` is removed, as in the JS SDK: the request a tool
+  sends is the owner's, and the back office keeps it. `answer` stays.
+- `g.account.export()` — `AccountClient.export()`, the JS SDK's member data
+  export: `GET /auth/export-account`, returning `AccountExport` (the headline
+  fields plus the whole `document`; `jsonData()` gives the bytes to save). A
+  second export within 30 days throws `GemmeinError` `export_rate_limited`
+  (429), with `resetAt` and `ownerContact` (the app's support address, or nil).
+  `AccountExport.about` is the document's cover: what it is, the app, when,
+  which door, the sections, what is left out and why, and the person's rights.
+- `upload(_:name:contentType:for:)` takes `for: [String]` — a group attachment
+  on a direct collection that up to 20 named people can link, the JS
+  `upload(file, { for: [ids] })`. The single-`String` form is unchanged.
+- `g.runs` — `RunsClient`, the JS SDK's `g.runs` in Swift: `start(_:inputs:key:)`
+  starts a run on an image, audio or video tool (202, credits reserved at the
+  tool's ceiling), `get(_:)`, `list(since:limit:)` (a `String` or a `Date`),
+  `cancel(_:)`, and `watch(_:intervalMs:onUpdate:)`, which polls from 2 s,
+  backing off ×1.5 to 10 s, until the run ends. Cancelling the calling `Task`
+  throws `GemmeinError` `aborted` (status 0), as an aborted `signal` does in
+  JS.
+- `Run`, `RunStatus`, `RunResult`, `RunResultFile` and `RunHandoff`, field for
+  field with the JS `Run`. A status this build does not know arrives as
+  `RunStatus.other(String)` and is treated as open.
+
 ## [0.16.0] — 2026-10-07
 
 Pinned to `@gemmein/sdk` 0.16.0 and engine 0.22.0.

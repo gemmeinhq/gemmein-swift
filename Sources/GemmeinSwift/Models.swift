@@ -388,6 +388,336 @@ public struct UploadedFile: Sendable, Equatable {
     }
 }
 
+/// What `account.export()` returns: the whole export document, typed field
+/// for field as the JS `AccountExport`, plus `document`, the JSON exactly as
+/// Gemmein sent it (`jsonData()` is the file a person saves). It opens with
+/// `about`, the cover: what it is, the app, when, which door, the sections,
+/// what is left out and why, and the person's rights. The sections
+/// are `records`, `marks`, `files`, `purchases`, `subscription`, `credits`,
+/// `access`, `aiCalls`, `runs`, `emails`, `support`, `sessions`, `signIns`
+/// and `limits`. `limits.truncated` names every section something was left
+/// out of (past its cap, or the shared byte budget) — empty when whole.
+public struct AccountExport: Sendable, Equatable {
+    /// The document's top-level keys, in the order the JS type declares them.
+    public static let keys = ["exportVersion", "about", "exportedAt", "app", "person", "records", "recordCount", "marks", "files", "purchases", "subscription", "credits", "access", "aiCalls", "runs", "emails", "support", "sessions", "signIns", "limits"]
+
+    /// The cover (GDPR Art. 15(1) supplementary information).
+    public struct About: Sendable, Equatable {
+        /// A category the export leaves out, and why.
+        public struct Omission: Sendable, Equatable {
+            public let what: String
+            public let why: String
+        }
+        public let what: String
+        /// The app's name.
+        public let app: String?
+        public let generatedAt: String
+        /// "self" (the person's own `account.export()`) or "owner" (the dashboard).
+        public let door: String
+        public let producedBy: String
+        public let sections: [String]
+        /// Where the caps are (`limits`).
+        public let limits: String
+        public let notIncluded: [Omission]
+        /// The app's Terms of Service link, when it gave one.
+        public let termsUrl: String?
+        /// The address the app's owner is reached at, when it has one.
+        public let ownerContact: String?
+        /// The person's rights, in one line.
+        public let rights: String
+    }
+    public struct App: Sendable, Equatable {
+        public let appId: String
+        public let environmentId: String
+    }
+    public struct Person: Sendable, Equatable {
+        public let id: String
+        public let email: String
+        public let createdAt: String
+        public let lastSignInAt: String?
+        public let suspendedAt: String?
+        public let invitedAt: String?
+    }
+    /// A record they wrote (`relation` "author") or that names them ("recipient").
+    public struct Record: Sendable, Equatable {
+        public let id: String
+        public let relation: String
+        public let data: [String: JSONValue]
+        public let to: String?
+        public let recipients: [String]?
+        public let from: String?
+        public let createdAt: String
+        public let updatedAt: String
+    }
+    /// Their own like or flag (an open field).
+    public struct Mark: Sendable, Equatable {
+        public let recordId: String
+        public let field: String
+        public let createdAt: String
+    }
+    /// A file they uploaded (`relation` "uploader") or are named a reader of
+    /// ("reader"). A private file's `url` expires at `urlExpiresAt` (5
+    /// minutes); a file anyone can read has a permanent `url` and no
+    /// `urlExpiresAt`.
+    public struct File: Sendable, Equatable {
+        public let ref: String
+        public let collection: String
+        public let relation: String
+        public let name: String?
+        public let contentType: String
+        public let sizeBytes: Int?
+        public let createdAt: String
+        public let url: String
+        public let urlExpiresAt: String?
+    }
+    /// The same summary `purchases.mine()` answers, with its payment reference.
+    public struct Purchase: Sendable, Equatable {
+        public let item: String
+        public let kind: String
+        public let paymentRef: String?
+        public let amountMinor: Int?
+        public let currency: String?
+        public let refundedMinor: Int
+        /// "paid", "part_refunded" or "refunded".
+        public let status: String
+        public let grants: [String]
+        public let paidAt: String
+    }
+    public struct Subscription: Sendable, Equatable {
+        public let plan: String
+        public let status: String
+        public let since: String
+        public let lastEventAt: String?
+    }
+    public struct Credits: Sendable, Equatable {
+        public struct Balance: Sendable, Equatable {
+            public let balance: Int
+            public let reserved: Int
+            /// The credits that expire next, and when; nil when none do.
+            public let expiringCredits: Int?
+            public let expiringAt: String?
+        }
+        public struct Grant: Sendable, Equatable {
+            public let id: String
+            public let amount: Int
+            public let remaining: Int
+            public let source: String
+            public let expiresAt: String?
+            public let expiredAt: String?
+            public let createdAt: String
+        }
+        public struct Reservation: Sendable, Equatable {
+            public let id: String
+            public let amount: Int
+            public let consumed: Int?
+            public let status: String
+            public let expiresAt: String
+            public let createdAt: String
+            public let closedAt: String?
+        }
+        public struct LedgerEntry: Sendable, Equatable {
+            public let id: String
+            public let kind: String
+            public let delta: Int
+            public let balanceAfter: Int
+            public let sourceType: String
+            public let createdAt: String
+        }
+        public let balance: Balance
+        public let grants: [Grant]
+        public let reservations: [Reservation]
+        public let ledger: [LedgerEntry]
+    }
+    public struct Access: Sendable, Equatable {
+        public let id: String
+        public let kind: String
+        public let ref: String
+        public let sourceType: String
+        public let startsAt: String
+        public let expiresAt: String?
+        public let revokedAt: String?
+        public let createdAt: String
+    }
+    public struct Email: Sendable, Equatable {
+        public let id: String
+        public let kind: String
+        public let sentTo: String?
+        public let sentAt: String
+        public let skippedReason: String?
+    }
+    /// A conversation with the app's support inbox, matched on their sign-in address.
+    public struct SupportThread: Sendable, Equatable {
+        public struct Message: Sendable, Equatable {
+            /// "from_person" or "to_person".
+            public let direction: String
+            public let subject: String
+            public let text: String
+            /// Attachment names.
+            public let attachments: [String]
+            public let at: String
+        }
+        public let subject: String
+        public let startedAt: String
+        public let lastMessageAt: String
+        public let messages: [Message]
+    }
+    public struct Session: Sendable, Equatable {
+        public let id: String
+        public let createdAt: String
+        public let expiresAt: String
+        public let revokedAt: String?
+    }
+    public struct SignIn: Sendable, Equatable {
+        public let event: String
+        public let at: String
+        public let allowed: Bool
+        public let ip: String?
+    }
+    public struct Limits: Sendable, Equatable {
+        /// Each section's cap.
+        public struct Caps: Sendable, Equatable {
+            public static let keys = ["records", "files", "marks", "purchases", "aiCalls", "runs", "creditLedger", "emails", "sessions", "signIns", "support"]
+            public let records: Int
+            public let files: Int
+            public let marks: Int
+            public let purchases: Int
+            public let aiCalls: Int
+            public let runs: Int
+            public let creditLedger: Int
+            public let emails: Int
+            public let sessions: Int
+            public let signIns: Int
+            public let support: Int
+        }
+        public let caps: Caps
+        /// The UTF-8 byte budget records, AI calls, runs and support messages share.
+        public let textBudgetBytes: Int
+        /// Every section something was left out of — empty when the export is whole.
+        public let truncated: [String]
+    }
+
+    public let exportVersion: Int
+    public let about: About
+    public let exportedAt: String
+    public let app: App
+    public let person: Person
+    /// By collection name.
+    public let records: [String: [Record]]
+    public let recordCount: Int
+    public let marks: [Mark]
+    public let files: [File]
+    public let purchases: [Purchase]
+    public let subscription: Subscription?
+    public let credits: Credits
+    public let access: [Access]
+    /// The same records `ai.calls()` returns — never the tool's prompt.
+    public let aiCalls: [AiCallRecord]
+    /// The same view `runs` returns (result files are in `files`).
+    public let runs: [Run]
+    public let emails: [Email]
+    public let support: [SupportThread]
+    public let sessions: [Session]
+    public let signIns: [SignIn]
+    public let limits: Limits
+    /// The full export, exactly as Gemmein sent it.
+    public let document: [String: JSONValue]
+
+    init(json: [String: JSONValue]) {
+        document = json
+        func objects(_ v: JSONValue?) -> [[String: JSONValue]] { (v?.array ?? []).compactMap { $0.object } }
+        func strings(_ v: JSONValue?) -> [String] { (v?.array ?? []).compactMap { $0.string } }
+        exportVersion = json["exportVersion"]?.int ?? 0
+        let ab = json["about"]?.object ?? [:]
+        about = About(what: ab["what"]?.string ?? "", app: ab["app"]?.string, generatedAt: ab["generatedAt"]?.string ?? "",
+                      door: ab["door"]?.string ?? "", producedBy: ab["producedBy"]?.string ?? "", sections: strings(ab["sections"]),
+                      limits: ab["limits"]?.string ?? "",
+                      notIncluded: objects(ab["notIncluded"]).map { .init(what: $0["what"]?.string ?? "", why: $0["why"]?.string ?? "") },
+                      termsUrl: ab["termsUrl"]?.string, ownerContact: ab["ownerContact"]?.string, rights: ab["rights"]?.string ?? "")
+        exportedAt = json["exportedAt"]?.string ?? ""
+        let a = json["app"]?.object ?? [:]
+        app = App(appId: a["appId"]?.string ?? "", environmentId: a["environmentId"]?.string ?? "")
+        let p = json["person"]?.object ?? [:]
+        person = Person(id: p["id"]?.string ?? "", email: p["email"]?.string ?? "", createdAt: p["createdAt"]?.string ?? "",
+                        lastSignInAt: p["lastSignInAt"]?.string, suspendedAt: p["suspendedAt"]?.string, invitedAt: p["invitedAt"]?.string)
+        records = (json["records"]?.object ?? [:]).mapValues { list in
+            objects(list).map { r in
+                Record(id: r["id"]?.string ?? "", relation: r["relation"]?.string ?? "", data: r["data"]?.object ?? [:],
+                       to: r["to"]?.string, recipients: r["recipients"]?.array.map { $0.compactMap { $0.string } }, from: r["from"]?.string,
+                       createdAt: r["createdAt"]?.string ?? "", updatedAt: r["updatedAt"]?.string ?? "")
+            }
+        }
+        recordCount = json["recordCount"]?.int ?? 0
+        marks = objects(json["marks"]).map { Mark(recordId: $0["recordId"]?.string ?? "", field: $0["field"]?.string ?? "", createdAt: $0["createdAt"]?.string ?? "") }
+        files = objects(json["files"]).map { f in
+            File(ref: f["ref"]?.string ?? "", collection: f["collection"]?.string ?? "", relation: f["relation"]?.string ?? "",
+                 name: f["name"]?.string, contentType: f["contentType"]?.string ?? "", sizeBytes: f["sizeBytes"]?.int,
+                 createdAt: f["createdAt"]?.string ?? "", url: f["url"]?.string ?? "", urlExpiresAt: f["urlExpiresAt"]?.string)
+        }
+        purchases = objects(json["purchases"]).map { x in
+            Purchase(item: x["item"]?.string ?? "", kind: x["kind"]?.string ?? "", paymentRef: x["paymentRef"]?.string,
+                     amountMinor: x["amountMinor"]?.int, currency: x["currency"]?.string, refundedMinor: x["refundedMinor"]?.int ?? 0,
+                     status: x["status"]?.string ?? "", grants: strings(x["grants"]), paidAt: x["paidAt"]?.string ?? "")
+        }
+        subscription = json["subscription"]?.object.map { x in
+            Subscription(plan: x["plan"]?.string ?? "", status: x["status"]?.string ?? "", since: x["since"]?.string ?? "", lastEventAt: x["lastEventAt"]?.string)
+        }
+        let c = json["credits"]?.object ?? [:]
+        let b = c["balance"]?.object ?? [:]
+        let expiring = b["expiring"]?.object
+        credits = Credits(
+            balance: .init(balance: b["balance"]?.int ?? 0, reserved: b["reserved"]?.int ?? 0, expiringCredits: expiring?["credits"]?.int, expiringAt: expiring?["at"]?.string),
+            grants: objects(c["grants"]).map { g in
+                .init(id: g["id"]?.string ?? "", amount: g["amount"]?.int ?? 0, remaining: g["remaining"]?.int ?? 0, source: g["source"]?.string ?? "",
+                      expiresAt: g["expiresAt"]?.string, expiredAt: g["expiredAt"]?.string, createdAt: g["createdAt"]?.string ?? "")
+            },
+            reservations: objects(c["reservations"]).map { r in
+                .init(id: r["id"]?.string ?? "", amount: r["amount"]?.int ?? 0, consumed: r["consumed"]?.int, status: r["status"]?.string ?? "",
+                      expiresAt: r["expiresAt"]?.string ?? "", createdAt: r["createdAt"]?.string ?? "", closedAt: r["closedAt"]?.string)
+            },
+            ledger: objects(c["ledger"]).map { e in
+                .init(id: e["id"]?.string ?? "", kind: e["kind"]?.string ?? "", delta: e["delta"]?.int ?? 0, balanceAfter: e["balanceAfter"]?.int ?? 0,
+                      sourceType: e["sourceType"]?.string ?? "", createdAt: e["createdAt"]?.string ?? "")
+            }
+        )
+        access = objects(json["access"]).map { x in
+            Access(id: x["id"]?.string ?? "", kind: x["kind"]?.string ?? "", ref: x["ref"]?.string ?? "", sourceType: x["sourceType"]?.string ?? "",
+                   startsAt: x["startsAt"]?.string ?? "", expiresAt: x["expiresAt"]?.string, revokedAt: x["revokedAt"]?.string, createdAt: x["createdAt"]?.string ?? "")
+        }
+        aiCalls = objects(json["aiCalls"]).map { AiCallRecord(json: $0) }
+        runs = objects(json["runs"]).map { Run(json: $0) }
+        emails = objects(json["emails"]).map { x in
+            Email(id: x["id"]?.string ?? "", kind: x["kind"]?.string ?? "", sentTo: x["sentTo"]?.string, sentAt: x["sentAt"]?.string ?? "", skippedReason: x["skippedReason"]?.string)
+        }
+        support = objects(json["support"]).map { t in
+            SupportThread(subject: t["subject"]?.string ?? "", startedAt: t["startedAt"]?.string ?? "", lastMessageAt: t["lastMessageAt"]?.string ?? "",
+                          messages: objects(t["messages"]).map { m in
+                              .init(direction: m["direction"]?.string ?? "", subject: m["subject"]?.string ?? "", text: m["text"]?.string ?? "",
+                                    attachments: strings(m["attachments"]), at: m["at"]?.string ?? "")
+                          })
+        }
+        sessions = objects(json["sessions"]).map { x in
+            Session(id: x["id"]?.string ?? "", createdAt: x["createdAt"]?.string ?? "", expiresAt: x["expiresAt"]?.string ?? "", revokedAt: x["revokedAt"]?.string)
+        }
+        signIns = objects(json["signIns"]).map { x in
+            SignIn(event: x["event"]?.string ?? "", at: x["at"]?.string ?? "", allowed: x["allowed"]?.bool ?? false, ip: x["ip"]?.string)
+        }
+        let l = json["limits"]?.object ?? [:]
+        let k = l["caps"]?.object ?? [:]
+        limits = Limits(
+            caps: .init(records: k["records"]?.int ?? 0, files: k["files"]?.int ?? 0, marks: k["marks"]?.int ?? 0, purchases: k["purchases"]?.int ?? 0,
+                        aiCalls: k["aiCalls"]?.int ?? 0, runs: k["runs"]?.int ?? 0, creditLedger: k["creditLedger"]?.int ?? 0, emails: k["emails"]?.int ?? 0,
+                        sessions: k["sessions"]?.int ?? 0, signIns: k["signIns"]?.int ?? 0, support: k["support"]?.int ?? 0),
+            textBudgetBytes: l["textBudgetBytes"]?.int ?? 0,
+            truncated: strings(l["truncated"])
+        )
+    }
+
+    /// The document as pretty-printed JSON bytes — the file a person saves.
+    public func jsonData() throws -> Data {
+        try JSONSerialization.data(withJSONObject: document.mapValues { $0.foundationValue }, options: [.prettyPrinted, .sortedKeys])
+    }
+}
+
 /// One of the person's own AI calls, as `ai.calls()` lists them.
 public struct AiCallRecord: Sendable, Equatable {
     public let id: String
@@ -403,8 +733,15 @@ public struct AiCallRecord: Sendable, Equatable {
     public let outcome: String
     public let refusalCode: String?
     public let latencyMs: Int?
-    public let prompt: String?
+    /// What the person was answered, only when the tool records calls.
+    /// There is no prompt: the request a tool sends is the owner's — the
+    /// back office keeps it, a person never sees it.
     public let answer: String?
+    /// What was metered: "call", "tokens", "seconds", "images" or
+    /// "characters", and the count the charge came from. Nil on a call from
+    /// before unit prices.
+    public let units: String?
+    public let unitCount: Double?
     public let createdAt: String
 
     init(json: [String: JSONValue]) {
@@ -419,8 +756,9 @@ public struct AiCallRecord: Sendable, Equatable {
         outcome = json["outcome"]?.string ?? ""
         refusalCode = json["refusalCode"]?.string
         latencyMs = json["latencyMs"]?.int
-        prompt = json["prompt"]?.string
         answer = json["answer"]?.string
+        units = json["units"]?.string
+        unitCount = json["unitCount"]?.double
         createdAt = json["createdAt"]?.string ?? ""
     }
 }
@@ -571,4 +909,136 @@ public struct NotifyResult: Sendable, Equatable {
 /// five order emails.
 public enum NotifyKind: String, Sendable {
     case event, account
+}
+
+// ── runs (job tools) ─────────────────────────────────────────────────────
+
+/// A run's state. Open: `queued` · `running`. Ended: `succeeded` · `failed`
+/// · `cancelled` · `expired`. A state this build does not know arrives as
+/// `.other` and is treated as open.
+public enum RunStatus: Sendable, Equatable {
+    case queued, running, succeeded, failed, cancelled, expired
+    case other(String)
+
+    init(_ raw: String) {
+        switch raw {
+        case "queued": self = .queued
+        case "running": self = .running
+        case "succeeded": self = .succeeded
+        case "failed": self = .failed
+        case "cancelled": self = .cancelled
+        case "expired": self = .expired
+        default: self = .other(raw)
+        }
+    }
+
+    /// `succeeded` · `failed` · `cancelled` · `expired` — `watch` stops here.
+    public var isEnded: Bool {
+        switch self {
+        case .succeeded, .failed, .cancelled, .expired: return true
+        case .queued, .running, .other: return false
+        }
+    }
+}
+
+/// One output of a succeeded run — a sealed file on the person.
+public struct RunResultFile: Sendable, Equatable {
+    public let ref: String
+    public let contentType: String
+    public let sizeBytes: Int
+    /// A short-lived signed URL minted for THIS answer — neither a ref nor a
+    /// URL is proof of access; call `runs.get` again when it lapses.
+    public let url: String?
+    public let urlExpiresAt: String?
+
+    init(json: [String: JSONValue]) {
+        ref = json["ref"]?.string ?? ""
+        contentType = json["contentType"]?.string ?? ""
+        sizeBytes = json["sizeBytes"]?.int ?? 0
+        url = json["url"]?.string
+        urlExpiresAt = json["urlExpiresAt"]?.string
+    }
+}
+
+/// A succeeded run's outputs: sealed files on the person and/or the text the
+/// provider answered.
+public struct RunResult: Sendable, Equatable {
+    public let files: [RunResultFile]
+    public let text: String?
+}
+
+/// A pipeline (`provider: "external"`) run's own hand-off. `attempts` counts
+/// the signed POSTs sent to the tool's URL; `acknowledgedAt` is set once one
+/// answered 2xx; `lastError` is the most recent delivery problem.
+public struct RunHandoff: Sendable, Equatable {
+    public let attempts: Int
+    public let acknowledgedAt: String?
+    public let lastError: String?
+}
+
+/// A RUN — what a job tool (generate · transcribe) answers with. Reserved at
+/// the ceiling when it is created, ended one of four ways.
+public struct Run: Sendable, Equatable {
+    public let id: String
+    public let tool: String
+    /// "generate" or "transcribe".
+    public let kind: String
+    public let status: RunStatus
+    /// 0…100 when the provider says, else nil.
+    public let progress: Int?
+    /// The app's own key for the run, when it sent one.
+    public let key: String?
+    /// The ceiling held at creation — never changes once the run exists.
+    public let reserved: Int
+    /// What is STILL held right now: `reserved` while open, 0 once ended.
+    public let held: Int
+    /// What it cost once ended (nil while open).
+    public let charged: Int?
+    /// "call", "tokens", "seconds", "images" or "characters".
+    public let units: String
+    public let unitCount: Double?
+    /// Nil until succeeded.
+    public let result: RunResult?
+    /// A pipeline's own untyped output, verbatim. Nil until succeeded, or
+    /// when none was sent.
+    public let data: JSONValue?
+    /// Why it failed or expired; nil otherwise.
+    public let error: String?
+    public let createdAt: String
+    public let updatedAt: String
+    public let endedAt: String?
+    /// Nil for every provider but `external`.
+    public let handoff: RunHandoff?
+
+    init(json: [String: JSONValue]) {
+        id = json["id"]?.string ?? ""
+        tool = json["tool"]?.string ?? ""
+        kind = json["kind"]?.string ?? ""
+        status = RunStatus(json["status"]?.string ?? "")
+        progress = json["progress"]?.int
+        key = json["key"]?.string
+        reserved = json["reserved"]?.int ?? 0
+        held = json["held"]?.int ?? 0
+        charged = json["charged"]?.int
+        units = json["units"]?.string ?? ""
+        unitCount = json["unitCount"]?.double
+        if let r = json["result"]?.object {
+            result = RunResult(
+                files: (r["files"]?.array ?? []).compactMap { $0.object.map { RunResultFile(json: $0) } },
+                text: r["text"]?.string
+            )
+        } else {
+            result = nil
+        }
+        if let d = json["data"], !d.isNull { data = d } else { data = nil }
+        error = json["error"]?.string
+        createdAt = json["createdAt"]?.string ?? ""
+        updatedAt = json["updatedAt"]?.string ?? ""
+        endedAt = json["endedAt"]?.string
+        if let h = json["handoff"]?.object {
+            handoff = RunHandoff(attempts: h["attempts"]?.int ?? 0, acknowledgedAt: h["acknowledgedAt"]?.string, lastError: h["lastError"]?.string)
+        } else {
+            handoff = nil
+        }
+    }
 }
