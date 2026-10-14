@@ -55,9 +55,9 @@ public final class AuthClient: @unchecked Sendable {
     public func logout() async throws {
         do {
             _ = try await runtimeRequest(config, "/auth/logout", method: "POST")
-            await config.tokenStore.clear()
+            await endSession(config, .signedOut)
         } catch {
-            await config.tokenStore.clear()
+            await endSession(config, .signedOut)
             // W10 row 9: logout is IDEMPOTENT. The commonest way this
             // round-trip fails is `401 auth_expired` — the owner already
             // signed this person out everywhere from the console, which is
@@ -77,6 +77,66 @@ public final class AuthClient: @unchecked Sendable {
     /// SUSPENDED person, whose session is intact and restored on unsuspend.
     // route: GET /auth/current-user
     public func currentUser() async throws -> CurrentUser {
-        CurrentUser(json: try requireObject(try await runtimeRequest(config, "/auth/current-user"), "current-user"))
+        let answer = CurrentUser(json: try requireObject(try await runtimeRequest(config, "/auth/current-user"), "current-user"))
+        // F34 (b): a session that ENDED (expired, or signed out elsewhere) is
+        // gone for good — the token clears and onSignedOut fires. Suspension
+        // carries no `ended`, so a suspended person's token is kept.
+        if !answer.authenticated, let ended = answer.ended {
+            await endSession(config, ended == "expired" ? .expired : .revoked)
+        }
+        return answer
+    }
+
+    /// F34 (b): hear when the person is signed out — however it happened:
+    /// here, from another of their devices, by the owner, or the session
+    /// expired. The token is already cleared when this fires, so route to
+    /// your sign-in screen from here. Returns a closure that stops listening.
+    // route: none
+    @discardableResult
+    public func onSignedOut(_ listener: @escaping @Sendable (SignedOutEvent) -> Void) -> @Sendable () -> Void {
+        config.signedOut.add(listener)
+    }
+
+    /// F34: the person's signed-in devices, newest first. A sign-in ADDS a
+    /// device (up to 10; the oldest is signed out when an 11th signs in).
+    // route: GET /auth/devices
+    public func devices() async throws -> [Device] {
+        let body = try requireObject(try await runtimeRequest(config, "/auth/devices"), "devices")
+        return (body["devices"]?.array ?? []).compactMap { $0.object }.map { Device(json: $0) }
+    }
+
+    /// F34: sign ONE device out, by the id from `devices()`. Signing out the
+    /// current device signs this app out (the token clears, onSignedOut
+    /// fires). An id that is not one of theirs is `device_not_found`.
+    /// Signing out ANOTHER device needs a recent sign-in (10 minutes); past
+    /// that the first call throws `confirm_required` and Gemmein emails a
+    /// confirm code — call again with `code:`.
+    // route: POST /auth/devices/sign-out
+    public func signOutDevice(_ id: String, code: String? = nil) async throws {
+        let current = (try? await devices())?.first(where: { $0.current })?.id
+        var payload = ["id": id]
+        if let code { payload["code"] = code }
+        _ = try await runtimeRequest(
+            config,
+            "/auth/devices/sign-out",
+            method: "POST",
+            body: try JSONCodec.encode(payload),
+            extraHeaders: ["content-type": "application/json"]
+        )
+        if current == id { await endSession(config, .signedOut) }
+    }
+
+    /// F34: "Sign out everywhere" — every device, this one included. The
+    /// token clears and onSignedOut fires.
+    // route: POST /auth/sign-out-everywhere
+    public func signOutEverywhere() async throws {
+        do {
+            _ = try await runtimeRequest(config, "/auth/sign-out-everywhere", method: "POST")
+            await endSession(config, .signedOut)
+        } catch {
+            await endSession(config, .signedOut)
+            if let gemmein = error as? GemmeinError, gemmein.status == 401, gemmein.code == "auth_expired" || gemmein.code == "session_required" { return }
+            throw error
+        }
     }
 }

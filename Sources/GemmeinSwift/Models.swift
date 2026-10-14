@@ -46,6 +46,9 @@ public struct GemmeinRecord: Sendable, Equatable {
     /// OPEN FIELDS: YOUR own marks — for each "count once per person" field,
     /// whether you counted it; for each "per person flag", your yes/no.
     public let mine: [String: Bool]
+    /// OPEN FIELDS (F46): for each "one per person of" field, the choice YOU
+    /// hold — absent when you hold none. The counts are in `data[field]`.
+    public let chosen: [String: String]
     /// OPEN FIELDS: on a secret-key read of one record, who set each
     /// "per person flag" (first 100).
     public let flaggedBy: [String: [String]]
@@ -77,6 +80,7 @@ public struct GemmeinRecord: Sendable, Equatable {
         expand = expanded
         existing = json["existing"]?.bool
         mine = (json["mine"]?.object ?? [:]).compactMapValues { $0.bool }
+        chosen = (json["mine"]?.object ?? [:]).compactMapValues { $0.string }
         flaggedBy = (json["flaggedBy"]?.object ?? [:]).mapValues { ($0.array ?? []).compactMap { $0.string } }
         recipients = json["recipients"]?.array?.compactMap { $0.string }
     }
@@ -204,9 +208,11 @@ public struct RecordStats: Sendable, Equatable {
 
 /// Answer to "who is signed in right now?". `authenticated == false` simply
 /// means "no one" — this call never throws for session state, so it is safe
-/// unguarded at launch. It is deliberately silent about the why: signed out,
-/// suspended and erased all read the same. Build the signed-out screen for
-/// all three.
+/// unguarded at launch. The only why it carries is `ended`, and only for a
+/// session that ran out ("expired") or was ended ("revoked": signed out from
+/// one of their devices, or by the owner — which one is not said). Suspended and erased
+/// read like no session at all (`ended` is nil), so a moderated user's state
+/// never reaches the app. Build the signed-out screen for every case.
 public struct CurrentUser: Sendable, Equatable {
     public let authenticated: Bool
     public let userId: String?
@@ -215,12 +221,87 @@ public struct CurrentUser: Sendable, Equatable {
     /// RevenueCat as the app user id. An engine that does not send it leaves
     /// this nil — read that as "not carried", never as "no account".
     public let storeAccountToken: String?
+    /// Signed out only: why the stored session stopped working — "expired" or
+    /// "revoked". nil when no session was held (or the engine doesn't say).
+    public let ended: String?
 
     init(json: [String: JSONValue]) {
         authenticated = json["authenticated"]?.bool ?? false
         userId = json["userId"]?.string
         email = json["email"]?.string
         storeAccountToken = json["storeAccountToken"]?.string
+        let reason = json["ended"]?.string
+        ended = reason == "expired" || reason == "revoked" ? reason : nil
+    }
+}
+
+/// F34 (E2E #3): one of the signed-in person's devices — a live session.
+/// `device` is a browser/OS label ("Chrome on macOS", "iPhone app") and
+/// `place` the approximate country; either is nil when it could not be
+/// read. The address itself is never stored or shown. `current` is the
+/// device asking; `test` a server test session.
+public struct Device: Sendable, Equatable {
+    public let id: String
+    public let device: String?
+    public let place: String?
+    public let signedInAt: String
+    public let lastActiveAt: String
+    public let expiresAt: String
+    public let test: Bool
+    public let current: Bool
+
+    init(json: [String: JSONValue]) {
+        id = json["id"]?.string ?? ""
+        device = json["device"]?.string
+        place = json["place"]?.string
+        signedInAt = json["signedInAt"]?.string ?? ""
+        lastActiveAt = json["lastActiveAt"]?.string ?? ""
+        expiresAt = json["expiresAt"]?.string ?? ""
+        test = json["test"]?.bool ?? false
+        current = json["current"]?.bool ?? false
+    }
+}
+
+/// F34 (b): why the person is now signed out — `.signedOut` (they asked),
+/// `.revoked` (signed out from another of their devices, or by the owner),
+/// `.expired` (the session's 30 days ran out).
+public struct SignedOutEvent: Sendable, Equatable {
+    public enum Reason: String, Sendable, Equatable {
+        case signedOut = "signed_out"
+        case revoked
+        case expired
+    }
+    public let reason: Reason
+}
+
+/// F34 (b): the listeners `auth.onSignedOut` registers.
+final class SignedOutListeners: @unchecked Sendable {
+    private let lock = NSLock()
+    private var listeners: [UUID: @Sendable (SignedOutEvent) -> Void] = [:]
+
+    func add(_ listener: @escaping @Sendable (SignedOutEvent) -> Void) -> @Sendable () -> Void {
+        let id = UUID()
+        lock.lock(); listeners[id] = listener; lock.unlock()
+        return { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); self.listeners[id] = nil; self.lock.unlock()
+        }
+    }
+
+    private var lastEnded: String?
+
+    /// Parallel 401s on one session announce its end once: true only for
+    /// the first caller to end this token.
+    func claim(_ token: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if lastEnded == token { return false }
+        lastEnded = token
+        return true
+    }
+
+    func emit(_ event: SignedOutEvent) {
+        lock.lock(); let current = Array(listeners.values); lock.unlock()
+        for listener in current { listener(event) }
     }
 }
 
@@ -853,6 +934,101 @@ public struct InviteResult: Sendable, Equatable {
 
 /// `spendCredits`'s answer: `spent` is the amount taken (0 on a deduped
 /// repeat); `event` is the ledger line — the same one on a repeat.
+/// 0.23.0: one Inbox conversation in a list (`listInboxThreads`).
+public struct InboxThreadSummary: Sendable, Equatable {
+    public let id: String
+    public let customer: String
+    public let subject: String
+    public let state: String
+    /// The customer wrote last — they are owed an answer.
+    public let unanswered: Bool
+    public let unread: Int
+    public let lastMessageAt: String
+    public let label: String?
+
+    init(json: [String: JSONValue]) {
+        id = json["id"]?.string ?? ""
+        customer = json["customer"]?.string ?? ""
+        subject = json["subject"]?.string ?? ""
+        state = json["state"]?.string ?? "open"
+        unanswered = json["unanswered"]?.bool ?? false
+        unread = json["unread"]?.int ?? 0
+        lastMessageAt = json["lastMessageAt"]?.string ?? ""
+        label = json["label"]?.string
+    }
+}
+
+public struct InboxThreadList: Sendable, Equatable {
+    public let threads: [InboxThreadSummary]
+    public let total: Int
+    public let unanswered: Int
+    public let capped: Bool
+
+    init(json: [String: JSONValue]) {
+        threads = (json["threads"]?.array ?? []).compactMap { $0.object }.map(InboxThreadSummary.init(json:))
+        total = json["total"]?.int ?? 0
+        unanswered = json["unanswered"]?.int ?? 0
+        capped = json["capped"]?.bool ?? false
+    }
+}
+
+public struct InboxMessage: Sendable, Equatable {
+    public let id: String
+    /// "customer", "you" or "your AI".
+    public let from: String
+    /// "connector" or "key" when an AI sent it.
+    public let sentVia: String?
+    public let sentByName: String?
+    public let subject: String
+    public let text: String
+    public let at: String
+    /// Why Gemmein reads a customer message as automatic, or nil.
+    public let automatic: String?
+
+    init(json: [String: JSONValue]) {
+        id = json["id"]?.string ?? ""
+        from = json["from"]?.string ?? ""
+        let sent = json["sentBy"]?.object
+        sentVia = sent?["via"]?.string
+        sentByName = sent?["name"]?.string
+        subject = json["subject"]?.string ?? ""
+        text = json["text"]?.string ?? ""
+        at = json["at"]?.string ?? ""
+        automatic = json["automatic"]?.string
+    }
+}
+
+public struct InboxThread: Sendable, Equatable {
+    public let thread: InboxThreadSummary
+    public let messages: [InboxMessage]
+    public let earlierMessages: Int
+    /// Whether an AI reply would go now — and if not, the refusal's code and sentence.
+    public let aiMayReply: Bool
+    public let aiRefusalCode: String?
+    public let aiRefusalMessage: String?
+
+    init(json: [String: JSONValue]) {
+        thread = InboxThreadSummary(json: json["thread"]?.object ?? [:])
+        messages = (json["messages"]?.array ?? []).compactMap { $0.object }.map(InboxMessage.init(json:))
+        earlierMessages = json["earlierMessages"]?.int ?? 0
+        let may = json["aiMayReply"]?.object ?? [:]
+        aiMayReply = may["ok"]?.bool ?? false
+        aiRefusalCode = may["code"]?.string
+        aiRefusalMessage = may["message"]?.string
+    }
+}
+
+public struct InboxReplyResult: Sendable, Equatable {
+    /// The recorded message's id; nil when it left but couldn't be recorded.
+    public let messageId: String?
+    public let recorded: Bool
+
+    init(json: [String: JSONValue]) {
+        messageId = json["message"]?.object?["id"]?.string
+        recorded = json["recorded"]?.bool ?? true
+    }
+}
+
 public struct SpendCreditsResult: Sendable, Equatable {
     public struct Event: Sendable, Equatable {
         public let id: String

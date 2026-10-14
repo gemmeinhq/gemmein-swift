@@ -52,7 +52,7 @@ public final class Watcher: @unchecked Sendable {
 }
 
 /// Talks to one collection. Collections themselves are created by the app
-/// owner in the dashboard (https://docs.gemmein.com/console/collections) — a 404
+/// owner in the dashboard (https://docs.gemmein.com/console/data) — a 404
 /// `unknown_collection` means it doesn't exist yet: ask the owner to create it
 /// there, don't retry.
 public final class CollectionClient: @unchecked Sendable {
@@ -461,6 +461,15 @@ public final class OpenFieldsClient: @unchecked Sendable {
     @discardableResult
     public func flag(_ field: String, _ on: Bool) async throws -> GemmeinRecord {
         try await change(["field": .string(field), "flag": .bool(on)])
+    }
+
+    /// A "one per person of a, b, c" field (a poll, an RSVP): your ONE choice
+    /// from its list — choosing again changes it, `nil` withdraws it. The
+    /// record counts each choice; `record.chosen[field]` is yours.
+    // route: POST /storage/{collection}/{id}/open
+    @discardableResult
+    public func choose(_ field: String, _ choice: String?) async throws -> GemmeinRecord {
+        try await change(["field": .string(field), "choose": choice.map { .string($0) } ?? .null])
     }
 
     private func change(_ body: [String: JSONValue]) async throws -> GemmeinRecord {

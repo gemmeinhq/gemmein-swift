@@ -12,6 +12,25 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-14
+
+Pinned to `@gemmein/sdk` 0.18.0 and engine 0.23.0.
+
+- `auth.devices()`, `auth.signOutDevice(_:code:)` and
+  `auth.signOutEverywhere()`, as in the JS SDK; `auth.logout()` ends this
+  device's session only. `auth.onSignedOut(_:)` fires with a `SignedOutEvent`
+  (`.signedOut`, `.revoked`, `.expired`) and returns a function that stops
+  listening. A user read from a stored session that no longer works carries
+  `ended`.
+- `GemmeinServer(secretKey:expects:)` takes `KeyExpectations` and throws
+  `key_scope_mismatch` (with `missing` / `extra`) when the key's access is
+  too narrow or too broad. `update(_:_:published:ifVersion:)`.
+- `listInboxThreads`, `getInboxThread` and `replyInboxThread` for a server
+  key holding the support Inbox.
+- `choose(_:_:)` on open fields ("one per person of"); the record carries
+  `chosen`.
+- `GemmeinError` has `docs`, `missing` and `extra`.
+
 ## [0.17.0] — 2026-10-10
 
 Pinned to `@gemmein/sdk` 0.17.0 and engine 0.22.1.

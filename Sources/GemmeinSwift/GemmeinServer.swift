@@ -13,8 +13,15 @@ public final class GemmeinServer: @unchecked Sendable {
     private let apiURL: URL
     private let secretKey: String
     private let session: URLSession
+    /// E2E #3 F20: present when the app named what it expects of the key.
+    private let keyCheck: KeyCheck?
 
-    public init(secretKey: String, apiURL: URL = defaultAPIURL, session: URLSession = .shared) throws {
+    /// `expects`: what this app needs the key to do, exactly. Before the
+    /// first call the SDK asks `GET /manage/whoami` what the key may do;
+    /// anything missing OR extra throws `key_scope_mismatch` (with `missing`
+    /// and `extra`) and no call is made — the same check the JS SDK's
+    /// `gemmeinServer(sk, { expects })` makes. Nil: nothing is checked.
+    public init(secretKey: String, apiURL: URL = defaultAPIURL, session: URLSession = .shared, expects: KeyExpectations? = nil) throws {
         // Same signpost law as the client: a missing key (the env var didn't
         // load) must be a typed error, never a crash.
         if !secretKey.hasPrefix("sk_") {
@@ -47,6 +54,7 @@ public final class GemmeinServer: @unchecked Sendable {
         self.apiURL = apiURL
         self.secretKey = secretKey
         self.session = session
+        self.keyCheck = expects.map { KeyCheck(expects: $0, apiURL: apiURL, secretKey: secretKey, session: session) }
     }
 
     /// True when this process is an app its users install — every Apple
@@ -77,7 +85,7 @@ public final class GemmeinServer: @unchecked Sendable {
     // route: none
     public func collection(_ name: String) throws -> ServerCollectionClient {
         try assertCollectionName(name)
-        return ServerCollectionClient(apiURL: apiURL, secretKey: secretKey, name: name, session: session)
+        return ServerCollectionClient(apiURL: apiURL, secretKey: secretKey, name: name, session: session, keyCheck: keyCheck)
     }
 
     /// Mint a member session for a test email WITHOUT an OTP round-trip — so a
@@ -241,9 +249,48 @@ public final class GemmeinServer: @unchecked Sendable {
         return GrantResult(grant: Grant(json: body["grant"]?.object ?? [:]), holdings: Holdings(json: body["holdings"]?.object ?? [:]))
     }
 
+    /// 0.23.0 THE INBOX ON YOUR SERVER — the app's support conversations,
+    /// unanswered first (up to 50, default 20). A Live key sees Live's side
+    /// of the Inbox; a Development key only Development's people. Needs the
+    /// key's "Read your customers' support messages" box ticked.
+    // route: GET /server/inbox/threads
+    public func listInboxThreads(unanswered: Bool = false, limit: Int? = nil) async throws -> InboxThreadList {
+        var query: [String] = []
+        if unanswered { query.append("unanswered=true") }
+        if let limit { query.append("limit=\(limit)") }
+        let path = "/server/inbox/threads" + (query.isEmpty ? "" : "?" + query.joined(separator: "&"))
+        return InboxThreadList(json: try requireObject(try await gate(path), "an inbox list"))
+    }
+
+    /// One conversation, oldest first, plain text — who wrote each message,
+    /// which were automatic, and whether an AI reply would go now
+    /// (`aiMayReply`). Reading never marks it read. Needs "Read your
+    /// customers' support messages"; `thread_not_found` (404) otherwise.
+    // route: GET /server/inbox/threads/{threadId}
+    public func getInboxThread(_ threadId: String) async throws -> InboxThread {
+        InboxThread(json: try requireObject(try await gate("/server/inbox/threads/\(percentEncodeComponent(threadId))"), "a conversation"))
+    }
+
+    /// Reply inside an EXISTING conversation — plain text, to its customer
+    /// only, from the app's own support address, exactly as the dashboard's
+    /// reply. Refused with nothing sent after an automatic message
+    /// (`inbox_auto_reply`), after 3 AI replies in a row (`inbox_reply_cap`),
+    /// while the last message can't be read (`inbox_unreadable`), past the
+    /// caps (`inbox_reply_limited`, `development_capped`). Needs "Reply to
+    /// your customers' support messages".
+    // route: POST /server/inbox/threads/{threadId}/reply
+    @discardableResult
+    public func replyInboxThread(_ threadId: String, text: String) async throws -> InboxReplyResult {
+        InboxReplyResult(json: try requireObject(
+            try await gate("/server/inbox/threads/\(percentEncodeComponent(threadId))/reply", method: "POST", body: try JSONCodec.encode(["text": text])),
+            "a reply"
+        ))
+    }
+
     /// One request path for every gate call, so every refusal reaches the
     /// caller through the SAME typed error the rest of the SDK throws.
     private func gate(_ pathAndQuery: String, method: String = "GET", body: Data? = nil) async throws -> JSONValue? {
+        try await keyCheck?.ensure()
         var headers = ["x-app-key": secretKey, "x-client-info": GemmeinSwift.clientInfo]
         if body != nil { headers["content-type"] = "application/json" }
         let request = makeRequest(makeURL(apiURL, pathAndQuery), method: method, headers: headers, body: body)
@@ -266,12 +313,14 @@ public final class ServerCollectionClient: @unchecked Sendable {
     private let secretKey: String
     private let name: String
     private let session: URLSession
+    private let keyCheck: KeyCheck?
 
-    init(apiURL: URL, secretKey: String, name: String, session: URLSession) {
+    init(apiURL: URL, secretKey: String, name: String, session: URLSession, keyCheck: KeyCheck? = nil) {
         self.apiURL = apiURL
         self.secretKey = secretKey
         self.name = name
         self.session = session
+        self.keyCheck = keyCheck
     }
 
     // route: GET /storage/{collection}/{id}
@@ -288,8 +337,12 @@ public final class ServerCollectionClient: @unchecked Sendable {
 
     // route: PATCH /storage/{collection}/{id}
     @discardableResult
-    public func update(_ id: String, _ data: [String: JSONValue]) async throws -> GemmeinRecord {
-        let body = try await request("/\(percentEncodeComponent(id))", method: "PATCH", body: try JSONCodec.encode(data))
+    public func update(_ id: String, _ data: [String: JSONValue], published: Bool? = nil, ifVersion: Int? = nil) async throws -> GemmeinRecord {
+        var pairs: [(String, String)] = []
+        if let ifVersion { pairs.append(("ifVersion", String(ifVersion))) }
+        if let published { pairs.append(("published", published ? "true" : "false")) }
+        let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
+        let body = try await request("/\(percentEncodeComponent(id))\(query)", method: "PATCH", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
     }
 
@@ -343,6 +396,7 @@ public final class ServerCollectionClient: @unchecked Sendable {
     }
 
     private func request(_ suffix: String, method: String = "GET", body: Data? = nil) async throws -> JSONValue? {
+        try await keyCheck?.ensure()
         var headers = ["x-app-key": secretKey, "x-client-info": GemmeinSwift.clientInfo]
         if body != nil { headers["content-type"] = "application/json" }
         let url = makeURL(apiURL, "/storage/\(percentEncodeComponent(name))\(suffix)")
@@ -355,5 +409,145 @@ public final class ServerCollectionClient: @unchecked Sendable {
         // clients.
         guard (200...299).contains(status) else { throw readErrorBody(data, status: status) }
         return JSONCodec.decode(data)
+    }
+}
+
+// ── E2E #3 F20: A KEY CAN BE CHECKED ─────────────────────────────────────
+// The JS SDK's `expects` (packages/sdk/src/index.ts compareKeyAccess), the
+// same words in the same order — the parity law.
+
+/// The level a key holds on one collection, as `/manage/whoami` answers it.
+public enum KeyAccessLevel: String, Sendable {
+    case read = "read"
+    case readWrite = "read-write"
+    case readWriteDelete = "read-write-delete"
+}
+
+/// The people powers a server key can hold (ticked per key at mint).
+public enum KeyCapability: String, Sendable, CaseIterable {
+    case readPeople, grantAccess, invitePeople, spendCredits, inboxRead, inboxReply
+
+    var words: String {
+        switch self {
+        case .readPeople: return "look up a person's access by id"
+        case .grantAccess: return "grant and revoke access"
+        case .invitePeople: return "create a person by email"
+        case .spendCredits: return "spend a person's credits"
+        case .inboxRead: return "read your customers' support messages"
+        case .inboxReply: return "reply to your customers' support messages"
+        }
+    }
+}
+
+/// What an app expects of its server key — see `GemmeinServer(…, expects:)`.
+public struct KeyExpectations: Sendable {
+    public var collections: [String: KeyAccessLevel]
+    public var capabilities: [KeyCapability]
+
+    public init(collections: [String: KeyAccessLevel] = [:], capabilities: [KeyCapability] = []) {
+        self.collections = collections
+        self.capabilities = capabilities
+    }
+}
+
+private let keyVerbOrder = ["read", "write", "delete"]
+
+private func keyVerbs(_ level: String?) -> Set<String> {
+    guard let level else { return [] }
+    return Set(level.split(separator: "-").map(String.init).filter { keyVerbOrder.contains($0) })
+}
+
+private func keyVerbWords(_ verbs: [String]) -> String {
+    let words = verbs.map { $0 == "delete" ? "delete from" : $0 }
+    if words.count <= 1 { return words.first ?? "" }
+    return "\(words.dropLast().joined(separator: ", ")) and \(words.last!)"
+}
+
+/// What `expects` wants that the key lacks, and what the key holds beyond it.
+func compareKeyAccess(_ expects: KeyExpectations, allCollections: Bool, collections: [String: String], capabilities: [String]) -> (missing: [String], extra: [String]) {
+    var missing: [String] = []
+    var extra: [String] = []
+    let held = allCollections ? [:] : collections
+    for name in Set(expects.collections.keys).union(held.keys).sorted() {
+        let want = keyVerbs(expects.collections[name]?.rawValue)
+        let have = allCollections ? Set(keyVerbOrder) : keyVerbs(collections[name])
+        let short = keyVerbOrder.filter { want.contains($0) && !have.contains($0) }
+        let over = keyVerbOrder.filter { have.contains($0) && !want.contains($0) }
+        if !short.isEmpty { missing.append("this key cannot \(keyVerbWords(short)) \(name), which the app needs") }
+        if !over.isEmpty && !allCollections { extra.append("this key can also \(keyVerbWords(over)) \(name), which the app doesn't need") }
+    }
+    if allCollections { extra.append("this key reaches every collection, present and future (a full key) — the app names the collections it needs") }
+    let wantCaps = Set(expects.capabilities.map(\.rawValue))
+    let haveCaps = Set(capabilities)
+    for cap in KeyCapability.allCases {
+        if wantCaps.contains(cap.rawValue) && !haveCaps.contains(cap.rawValue) { missing.append("this key cannot \(cap.words), which the app needs") }
+        if haveCaps.contains(cap.rawValue) && !wantCaps.contains(cap.rawValue) { extra.append("this key can also \(cap.words), which the app doesn't need") }
+    }
+    return (missing, extra)
+}
+
+/// A key's access, read ONCE per process per (apiURL, key) — its scopes are
+/// fixed at mint, so a server building a client per request still asks
+/// whoami once. A failed read is dropped so the next call asks again.
+actor KeyAccessCache {
+    static let shared = KeyAccessCache()
+    private var reads: [String: Task<[String: JSONValue]?, Error>] = [:]
+
+    func access(apiURL: URL, secretKey: String, session: URLSession) async throws -> [String: JSONValue]? {
+        let key = "\(apiURL.absoluteString)\u{0}\(secretKey)"
+        if let existing = reads[key] { return try await existing.value }
+        let task = Task<[String: JSONValue]?, Error> {
+            let request = makeRequest(makeURL(apiURL, "/manage/whoami"), method: "GET", headers: ["x-app-key": secretKey, "x-client-info": GemmeinSwift.clientInfo], body: nil)
+            let (data, response) = try await transported(apiURL) { try await session.data(for: request) }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200...299).contains(status) else { throw readErrorBody(data, status: status) }
+            return JSONCodec.decode(data)?.object?["access"]?.object
+        }
+        reads[key] = task
+        do { return try await task.value } catch { reads[key] = nil; throw error }
+    }
+}
+
+/// Asks once; a mismatch is remembered, a failed check is not.
+actor KeyCheck {
+    private let expects: KeyExpectations
+    private let apiURL: URL
+    private let secretKey: String
+    private let session: URLSession
+    private var passed = false
+    private var refused: GemmeinError?
+
+    init(expects: KeyExpectations, apiURL: URL, secretKey: String, session: URLSession) {
+        self.expects = expects
+        self.apiURL = apiURL
+        self.secretKey = secretKey
+        self.session = session
+    }
+
+    func ensure() async throws {
+        if passed { return }
+        if let refused { throw refused }
+        guard let access = try await KeyAccessCache.shared.access(apiURL: apiURL, secretKey: secretKey, session: session) else {
+            let error = GemmeinError(status: 0, code: "key_scope_mismatch", message: "this is not a server key — `expects` checks a server key (Secret keys in the dashboard); a key the CLI holds after `npx gemmein login` acts as you and is never an app's key", missing: [], extra: [])
+            refused = error
+            throw error
+        }
+        var held: [String: String] = [:]
+        for (name, level) in access["collections"]?.object ?? [:] { if let l = level.string { held[name] = l } }
+        let caps = (access["capabilities"]?.array ?? []).compactMap(\.string)
+        let (missing, extra) = compareKeyAccess(expects, allCollections: access["allCollections"]?.bool == true, collections: held, capabilities: caps)
+        if missing.isEmpty && extra.isEmpty { passed = true; return }
+        let levelWords: [KeyAccessLevel: String] = [.read: "reads only", .readWrite: "reads and writes", .readWriteDelete: "reads, writes and deletes"]
+        var wanted = expects.collections.keys.sorted().map { "\($0) \(levelWords[expects.collections[$0]!]!)" }
+        wanted += expects.capabilities.map(\.words)
+        let error = GemmeinError(
+            status: 0,
+            code: "key_scope_mismatch",
+            message: "the server key doesn't match what the app expects: \((missing + extra).joined(separator: "; ")). Make a key with exactly \(wanted.isEmpty ? "nothing" : wanted.joined(separator: "; ")) (dashboard → Secret keys → Create a secret key), put it where this one is, and revoke this one",
+            missing: missing,
+            extra: extra
+        )
+        refused = error
+        throw error
     }
 }

@@ -269,8 +269,8 @@ public final class AiClient: @unchecked Sendable {
                 return AiResponse(status: status, headers: fields, body: .buffered(collected))
             }
         }
-        let error = readErrorBody(collected, status: status)
-        if error.code == "auth_expired" { await config.tokenStore.clear() }
+        var error = readErrorBody(collected, status: status)
+        if error.code == "auth_expired" { error = await signedOutError(error, collected, config) }
         throw error
     }
 

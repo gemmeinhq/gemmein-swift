@@ -3,11 +3,11 @@ import Foundation
 /// This build's version. It tracks the npm SDK's major.minor — the two travel
 /// together by law, and the release check pins them equal.
 public enum GemmeinSwift {
-    public static let version = "0.17.0"
+    public static let version = "0.18.0"
 
     /// `x-client-info` — what every request tells the engine it is. The
     /// engine's key-usage ledger records it ("last seen from
-    /// gemmein-swift/0.17.0 ios"), so a misbehaving build can be attributed
+    /// gemmein-swift/0.18.0 ios"), so a misbehaving build can be attributed
     /// from day one. It is a report, not a proof.
     public static let clientInfo = "gemmein-swift/\(version)"
 
@@ -88,6 +88,29 @@ struct ClientConfig: @unchecked Sendable {
     let tokenStore: TokenStore
     let clientInfo: String
     let session: URLSession
+    /// F34 (b): the listeners `auth.onSignedOut` registers — one set per
+    /// client, shared by every sub-client, so a 401 anywhere reaches them.
+    var signedOut: SignedOutListeners = SignedOutListeners()
+}
+
+/// F34 (b): the session this client held has ended. The token is cleared and
+/// — only when one was actually held, so a burst of parallel 401s fires once
+/// — the signed-out listeners hear why.
+func endSession(_ config: ClientConfig, _ reason: SignedOutEvent.Reason) async {
+    let held = await config.tokenStore.get()
+    await config.tokenStore.clear()
+    if let held, config.signedOut.claim(held) { config.signedOut.emit(SignedOutEvent(reason: reason)) }
+}
+
+/// F34 (b): an auth_expired is a sign-out, not an error to render — the token
+/// clears, onSignedOut fires, and the message is the person's sentence.
+func signedOutError(_ error: GemmeinError, _ data: Data, _ config: ClientConfig) async -> GemmeinError {
+    let ended = JSONCodec.decode(data)?.object?["ended"]?.string
+    await endSession(config, ended == "expired" ? .expired : .revoked)
+    let sentence = ended == "expired" ? "Your session expired. Sign in again."
+        : ended == "revoked" ? "You were signed out. Sign in again."
+        : "You're signed out. Sign in again."
+    return GemmeinError(status: error.status, code: error.code, message: sentence)
 }
 
 /// Same headers for every call the client makes: the public key that
@@ -151,14 +174,14 @@ func handleResponse(_ data: Data, _ response: URLResponse, _ config: ClientConfi
     if !(200...299).contains(status) {
         var error = readErrorBody(data, status: status)
         // An expired session is the one refusal that changes local state.
-        if error.code == "auth_expired", let config { await config.tokenStore.clear() }
+        if error.code == "auth_expired", let config { error = await signedOutError(error, data, config) }
         // Signpost: a wrong or revoked key routes the builder to where a
         // working key comes from, instead of dead-ending.
         if error.code == "invalid_app_key" || error.code == "missing_app_key" {
             error = GemmeinError(
                 status: error.status,
                 code: error.code,
-                message: error.message + " — get your app key from the Setup page at https://app.gemmein.com (sign in with an email code, free, no card)",
+                message: error.message + " — npx gemmein keys app prints your app key (after npx gemmein login, approved in the browser)",
                 resetAt: error.resetAt,
                 requires: error.requires
             )

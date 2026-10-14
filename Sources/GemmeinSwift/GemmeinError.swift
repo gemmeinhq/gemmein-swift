@@ -23,14 +23,28 @@ public struct GemmeinError: Error, Sendable, Equatable {
     /// (`access:<slug>`). Show your upgrade screen and send the customer to
     /// checkout. A collection unlocked by several plans names ONE key here.
     public let requires: String?
+    /// Present on `key_scope_mismatch` (`GemmeinServer(…, expects:)`): what
+    /// the app expects that the key cannot do, one plain sentence each.
+    public let missing: [String]?
+    /// Present on `key_scope_mismatch`: what the key can do beyond what the
+    /// app expects — a key too broad is refused like one too narrow.
+    public let extra: [String]?
+    /// The code's own page — `https://docs.gemmein.com/errors/<code>`. On
+    /// refusals in Development and to secret keys; never on an answer to the
+    /// Live app key. Copied as the server sent it; the SDK's own refusals
+    /// (status 0) carry none.
+    public let docs: String?
 
-    public init(status: Int, code: String, message: String, resetAt: String? = nil, ownerContact: String? = nil, requires: String? = nil) {
+    public init(status: Int, code: String, message: String, resetAt: String? = nil, ownerContact: String? = nil, requires: String? = nil, missing: [String]? = nil, extra: [String]? = nil, docs: String? = nil) {
         self.status = status
         self.code = code
         self.message = message
         self.resetAt = resetAt
         self.ownerContact = ownerContact
         self.requires = requires
+        self.missing = missing
+        self.extra = extra
+        self.docs = docs
     }
 }
 
@@ -58,6 +72,7 @@ func readErrorBody(_ data: Data, status: Int) -> GemmeinError {
         // here, and nothing else from the body becomes SDK surface.
         resetAt: body["resetAt"]?.string,
         ownerContact: body["ownerContact"]?.string,
-        requires: body["requires"]?.string
+        requires: body["requires"]?.string,
+        docs: body["docs"]?.string
     )
 }

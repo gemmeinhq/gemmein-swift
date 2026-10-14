@@ -77,6 +77,54 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(stored, "gm_sess_suspended", "a suspended person's session survives — clearing it would make a reversible suspension permanent")
     }
 
+    /// F34 (E2E #3): the device list, one device signed out, everywhere —
+    /// the JS SDK's own requests; signing THIS device out signs the app out
+    /// and onSignedOut hears it once.
+    func testDevicesSignOutDeviceAndEverywhereWriteTheJSSDKRequests() async throws {
+        let list = #"{"devices":[{"id":"sess_here","device":"iPhone app","place":"Paris, France","signedInAt":"a","lastActiveAt":"b","expiresAt":"c","test":false,"current":true},{"id":"sess_mac","device":"Safari on macOS","place":null,"signedInAt":"a","lastActiveAt":"b","expiresAt":"c","test":false,"current":false}]}"#
+        StubURLProtocol.queue([
+            .init(body: Data(list.utf8)),
+            .init(body: Data(list.utf8)), .init(body: Data(#"{"signedOut":"sess_mac"}"#.utf8)),
+            .init(body: Data(list.utf8)), .init(body: Data(#"{"signedOut":"sess_here"}"#.utf8)),
+        ])
+        let (g, store) = try client(token: "gm_sess_here")
+        let heard = HeardBox()
+        g.auth.onSignedOut { heard.add($0.reason.rawValue) }
+        let devices = try await g.auth.devices()
+        XCTAssertEqual(devices.map(\.id), ["sess_here", "sess_mac"])
+        XCTAssertEqual(devices[0].place, "Paris, France")
+        XCTAssertTrue(devices[0].current)
+        try await g.auth.signOutDevice("sess_mac")
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "GET /auth/devices")
+        XCTAssertEqual(sent[2].line, "POST /auth/devices/sign-out")
+        XCTAssertEqual(sent[2].json as NSDictionary?, ["id": "sess_mac"] as NSDictionary)
+        let still = await store.get()
+        XCTAssertEqual(still, "gm_sess_here", "another device signed out leaves this one")
+        XCTAssertEqual(heard.values, [])
+        try await g.auth.signOutDevice("sess_here")
+        let gone = await store.get()
+        XCTAssertNil(gone)
+        XCTAssertEqual(heard.values, ["signed_out"])
+    }
+
+    func testAnEndedSessionClearsTheTokenFiresOnceAndSaysThePersonsSentence() async throws {
+        StubURLProtocol.queue([.init(status: 401, body: Data(#"{"code":"auth_expired","message":"engine words","ended":"revoked"}"#.utf8))])
+        let (g, store) = try client(token: "gm_sess_old")
+        let heard = HeardBox()
+        g.auth.onSignedOut { heard.add($0.reason.rawValue) }
+        do {
+            _ = try await g.subscriptions.mine()
+            XCTFail("an ended session throws")
+        } catch let error as GemmeinError {
+            XCTAssertEqual(error.code, "auth_expired")
+            XCTAssertEqual(error.message, "You were signed out. Sign in again.")
+        }
+        let stored = await store.get()
+        XCTAssertNil(stored)
+        XCTAssertEqual(heard.values, ["revoked"])
+    }
+
     /// W10 row 9 — logout is IDEMPOTENT. `401 auth_expired` means the owner
     /// already signed this person out everywhere from the console: the
     /// session IS gone, which is the outcome logout asked for.
@@ -692,7 +740,7 @@ final class WireTests: XCTestCase {
             _ = try await g.credits.balance()
             XCTFail("a 401 must throw")
         } catch let error as GemmeinError {
-            XCTAssertTrue(error.message.contains("app.gemmein.com"), "the signpost, not a dead end")
+            XCTAssertTrue(error.message.contains("npx gemmein keys app"), "the signpost, not a dead end")
         }
     }
 
@@ -750,6 +798,53 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(sent[1].json as NSDictionary?, ["amount": 5, "reason": "render:4k", "key": "render:job_1"] as NSDictionary)
     }
 
+    /// E2E #3 F20 — A KEY CAN BE CHECKED: `expects` asks whoami first; a key
+    /// too broad is refused before the call, naming what is extra, and the
+    /// refusal is remembered (nothing else is dialled).
+    func testExpectsRefusesAKeyTooBroadBeforeAnyCall() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"access":{"allCollections":false,"collections":{"profiles":"read-write","mentor":"read-write"},"capabilities":["spendCredits"]}}"#.utf8))
+        ])
+        let server = try GemmeinServer(
+            secretKey: "sk_test_expects_broad", apiURL: apiURL, session: StubURLProtocol.session(),
+            expects: KeyExpectations(collections: ["profiles": .read, "mentor": .readWrite])
+        )
+        for _ in 0..<2 {
+            do {
+                _ = try await server.collection("mentor").list()
+                XCTFail("a key too broad must be refused")
+            } catch let error as GemmeinError {
+                XCTAssertEqual(error.code, "key_scope_mismatch")
+                XCTAssertEqual(error.missing, [])
+                XCTAssertEqual(error.extra, [
+                    "this key can also write profiles, which the app doesn't need",
+                    "this key can also spend a person's credits, which the app doesn't need"
+                ])
+            }
+        }
+        XCTAssertEqual(StubURLProtocol.captured.map(\.line), ["GET /manage/whoami"], "only the check went out")
+    }
+
+    func testExpectsLetsAnExactKeyThrough() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"access":{"allCollections":false,"collections":{"mentor":"read-write"},"capabilities":["invitePeople"]}}"#.utf8)),
+            .init(body: Data(#"{"records":[],"hasMore":false}"#.utf8)),
+            .init(body: Data(#"{"records":[],"hasMore":false}"#.utf8))
+        ])
+        let server = try GemmeinServer(
+            secretKey: "sk_test_expects_exact", apiURL: apiURL, session: StubURLProtocol.session(),
+            expects: KeyExpectations(collections: ["mentor": .readWrite], capabilities: [.invitePeople])
+        )
+        _ = try await server.collection("mentor").list()
+        // A second client on the same key reuses the process's one read.
+        let again = try GemmeinServer(
+            secretKey: "sk_test_expects_exact", apiURL: apiURL, session: StubURLProtocol.session(),
+            expects: KeyExpectations(collections: ["mentor": .readWrite], capabilities: [.invitePeople])
+        )
+        _ = try await again.collection("mentor").list()
+        XCTAssertEqual(StubURLProtocol.captured.map(\.line), ["GET /manage/whoami", "GET /storage/mentor", "GET /storage/mentor"])
+    }
+
     func testTestSessionIsRefusedOnALiveKeyBeforeARequestExists() async throws {
         StubURLProtocol.queue([])
         let server = try GemmeinServer(secretKey: "sk_live_1", apiURL: apiURL, session: StubURLProtocol.session())
@@ -760,6 +855,21 @@ final class WireTests: XCTestCase {
             XCTAssertEqual(error.code, "test_session_forbidden_live")
         }
         XCTAssertEqual(StubURLProtocol.captured.count, 0, "nothing is dialled")
+    }
+
+    /// F2 (E2E #3): the server client approves a draft and refuses a stale
+    /// edit the way the client does — `published` and `ifVersion` ride the query.
+    func testTheServerUpdateCarriesPublishedAndIfVersion() async throws {
+        let rec = Data(#"{"id":"r1","data":{},"createdAt":"a","updatedAt":"b","version":3}"#.utf8)
+        StubURLProtocol.queue([.init(body: rec), .init(body: rec), .init(body: rec)])
+        let server = try GemmeinServer(secretKey: "sk_test_1", apiURL: apiURL, session: StubURLProtocol.session())
+        _ = try await server.collection("feed").update("r1", [:], published: true)
+        _ = try await server.collection("feed").update("r1", ["title": "x"], published: false, ifVersion: 2)
+        _ = try await server.collection("feed").update("r1", ["title": "y"])
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "PATCH /storage/feed/r1?published=true")
+        XCTAssertEqual(sent[1].line, "PATCH /storage/feed/r1?ifVersion=2&published=false")
+        XCTAssertEqual(sent[2].line, "PATCH /storage/feed/r1")
     }
 
     func testTheServerCollectionAndGrantDoors() async throws {
@@ -934,4 +1044,12 @@ final class UpdateLog: @unchecked Sendable {
     private var _values: [String] = []
     func append(_ value: String) { lock.withLock { _values.append(value) } }
     var values: [String] { lock.withLock { _values } }
+}
+
+/// F34: a Sendable box the signed-out listener writes into.
+final class HeardBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String] = []
+    func add(_ value: String) { lock.lock(); items.append(value); lock.unlock() }
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return items }
 }

@@ -103,9 +103,9 @@ public final class SubscriptionsClient: @unchecked Sendable {
     }
 
     /// Where the signed-in subscriber changes plan, cancels or updates their
-    /// card: the app owner's Stripe customer portal, with their email filled
-    /// in. Throws 409 `portal_not_set_up` until the owner pastes the portal
-    /// link on Payments. Open the url yourself.
+    /// card: a Stripe customer portal session Gemmein opens for this member,
+    /// set up from the app's plans. Throws 409 `no_subscription` (never paid
+    /// for a plan) or `portal_unavailable`. Open the url yourself.
     // route: GET /auth/subscription/manage
     public func manage() async throws -> ManageLink {
         let body = try requireObject(try await runtimeRequest(config, "/auth/subscription/manage"), "a manage link")

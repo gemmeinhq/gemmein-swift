@@ -61,9 +61,9 @@ public final class Gemmein: @unchecked Sendable {
             throw GemmeinError(
                 status: 0,
                 code: "missing_app_key",
-                message: "Gemmein needs your app key (it starts with \"pk_\"). Get one in 30 seconds: "
-                    + "sign in at https://app.gemmein.com with an email code (free, no card) and "
-                    + "copy the key from the Setup page. Then: Gemmein(appKey: \"pk_...\")"
+                message: "Gemmein needs your app key (it starts with \"pk_\"). Nobody copies it: "
+                    + "npx gemmein login (approved in the browser) saves it in gemmein/gemmein.config.json, "
+                    + "and npx gemmein keys app prints it. Then: Gemmein(appKey: \"pk_...\")"
             )
         }
 
