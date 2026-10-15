@@ -12,6 +12,14 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-10-15
+
+Pinned to `@gemmein/sdk` 0.19.0 and engine 0.24.0.
+
+- `KeyCapability.testSessions` is a server-key power, as in the JS SDK: a
+  server key without it gets `403 capability_required` from
+  `testSession(_:)`; a full Development key holds it.
+
 ## [0.18.0] — 2026-10-14
 
 Pinned to `@gemmein/sdk` 0.18.0 and engine 0.23.0.

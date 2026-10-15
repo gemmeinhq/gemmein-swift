@@ -425,7 +425,7 @@ public enum KeyAccessLevel: String, Sendable {
 
 /// The people powers a server key can hold (ticked per key at mint).
 public enum KeyCapability: String, Sendable, CaseIterable {
-    case readPeople, grantAccess, invitePeople, spendCredits, inboxRead, inboxReply
+    case readPeople, grantAccess, invitePeople, spendCredits, inboxRead, inboxReply, testSessions
 
     var words: String {
         switch self {
@@ -435,6 +435,7 @@ public enum KeyCapability: String, Sendable, CaseIterable {
         case .spendCredits: return "spend a person's credits"
         case .inboxRead: return "read your customers' support messages"
         case .inboxReply: return "reply to your customers' support messages"
+        case .testSessions: return "sign in as a person in Development to test the app"
         }
     }
 }
