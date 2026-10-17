@@ -84,12 +84,15 @@ public final class CollectionClient: @unchecked Sendable {
         _ data: [String: JSONValue],
         key: String? = nil,
         for recipient: String? = nil,
-        published: Bool? = nil
+        published: Bool? = nil,
+        showFrom: Date? = nil,
+        showUntil: Date? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let key { pairs.append(("key", key)) }
         if let recipient { pairs.append(("for", recipient)) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
+        pairs += showPairs(from: showFrom, until: showUntil)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request(query, method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
@@ -103,12 +106,15 @@ public final class CollectionClient: @unchecked Sendable {
         _ data: [String: JSONValue],
         key: String? = nil,
         for recipients: [String],
-        published: Bool? = nil
+        published: Bool? = nil,
+        showFrom: Date? = nil,
+        showUntil: Date? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let key { pairs.append(("key", key)) }
         pairs.append(("for", recipients.joined(separator: ",")))
         if let published { pairs.append(("published", published ? "true" : "false")) }
+        pairs += showPairs(from: showFrom, until: showUntil)
         let body = try await request("?\(formURLEncode(pairs))", method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
     }
@@ -243,11 +249,14 @@ public final class CollectionClient: @unchecked Sendable {
         _ id: String,
         _ data: [String: JSONValue],
         ifVersion: Int? = nil,
-        published: Bool? = nil
+        published: Bool? = nil,
+        showFrom: ShowBound? = nil,
+        showUntil: ShowBound? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let ifVersion { pairs.append(("ifVersion", String(ifVersion))) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
+        pairs += showPairs(from: showFrom, until: showUntil)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request("/\(percentEncodeComponent(id))\(query)", method: "PATCH", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))

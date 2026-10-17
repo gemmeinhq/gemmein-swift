@@ -12,6 +12,20 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-10-18
+
+Pinned to `@gemmein/sdk` 0.20.0 and engine 0.26.0.
+
+- Show and hide times, as in the JS SDK: `create(_:key:for:published:showFrom:showUntil:)`
+  takes `Date`s; `update(_:_:ifVersion:published:showFrom:showUntil:)` takes a
+  `ShowBound` (`.at(date)` or `.clear`), on both clients. `GemmeinRecord`
+  carries `showFrom` and `showUntil`.
+- Rankable numbers: `ListSort.by("score", order: .asc)` (`RankOrder`, `.desc`
+  by default); each record on a ranked list carries `rank`. `ListSort` is no
+  longer a `String` raw-value enum: `.newest`, `.oldest` and `.updated` are
+  unchanged, `rawValue` and `ListSort(rawValue:)` are gone.
+- The server client's `create` names no person on an `app_only` collection.
+
 ## [0.19.0] — 2026-10-15
 
 Pinned to `@gemmein/sdk` 0.19.0 and engine 0.24.0.

@@ -81,10 +81,10 @@ the device is `async throws` and throws `GemmeinError`.
 
 | Method | Signature | Returns |
 |---|---|---|
-| `create(_:key:for:published:)` | `@discardableResult func create(_ data: [String: JSONValue], key: String? = nil, for recipient: String? = nil, published: Bool? = nil) async throws -> GemmeinRecord` | `GemmeinRecord` |
+| `create(_:key:for:published:showFrom:showUntil:)` | `@discardableResult func create(_ data: [String: JSONValue], key: String? = nil, for recipient: String? = nil, published: Bool? = nil, showFrom: Date? = nil, showUntil: Date? = nil) async throws -> GemmeinRecord` | `GemmeinRecord` |
 | `list(_:)` | `func list(_ options: ListOptions = ListOptions()) async throws -> ListResult` | `ListResult` — `records`, `cursor`, `hasMore`, `deleted`, `watermark` |
 | `get(_:expand:)` | `func get(_ id: String, expand: [String] = []) async throws -> GemmeinRecord` | `GemmeinRecord` |
-| `update(_:_:ifVersion:published:)` | `@discardableResult func update(_ id: String, _ data: [String: JSONValue], ifVersion: Int? = nil, published: Bool? = nil) async throws -> GemmeinRecord` | `GemmeinRecord` |
+| `update(_:_:ifVersion:published:showFrom:showUntil:)` | `@discardableResult func update(_ id: String, _ data: [String: JSONValue], ifVersion: Int? = nil, published: Bool? = nil, showFrom: ShowBound? = nil, showUntil: ShowBound? = nil) async throws -> GemmeinRecord` | `GemmeinRecord` |
 | `delete(_:)` | `func delete(_ id: String) async throws` | `Void` |
 | `upload(_:name:contentType:for:)` | `func upload(_ data: Data, name: String = "upload", contentType: String = "", for recipient: String? = nil) async throws -> UploadedFile` | `UploadedFile` — `id`, `ref` (`file:<uuid>`), `contentType`, `sizeBytes: Int` |
 | `count(where:search:)` | `func count(where filter: [String: JSONValue]? = nil, search: String? = nil) async throws -> Int` | `Int` — how many records this person could list, under the same rule, scope and filters |
@@ -92,7 +92,7 @@ the device is `async throws` and throws `GemmeinError`.
 | `watch(every:where:search:limit:onChange:)` | `func watch(every: TimeInterval? = nil, where filter: [String: JSONValue]? = nil, search: String? = nil, limit: Int? = nil, onChange: @escaping @Sendable (WatchDelta) -> Void) -> Watcher` | `Watcher` — not `async`; end it with `watcher.stop()` |
 
 `ListOptions(limit:sort:where:cursor:search:expand:since:)` — all optional.
-`sort` is `ListSort`: `.newest`, `.oldest`, `.updated`.
+`sort` is `ListSort`: `.newest`, `.oldest`, `.updated`, or `.by("score", order: .asc)` — a rankable number field (each record then carries `rank`). `create` takes `showFrom:` / `showUntil:` as `Date`s; `update` takes them as `ShowBound` (`.at(date)` or `.clear`).
 `where` is the same on `list`, `watch`, `count` and `stats`: a literal is an exact match; an object of operators narrows it — `eq` `ne` `gt` `gte` `lt` `lte` `in` `nin` `contains` `startsWith` `exists` (`["amount": ["gte": .int(10)], "status": ["in": ["paid", "sent"]]]`). Up to 5 fields, 1 to 3 operators each, all AND.
 
 ### The primitives

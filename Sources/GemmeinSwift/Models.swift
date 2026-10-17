@@ -55,6 +55,16 @@ public struct GemmeinRecord: Sendable, Equatable {
     /// MANY RECIPIENTS: everyone a direct record was sent to, in order, when
     /// it named more than one.
     public let recipients: [String]?
+    /// SHOW / HIDE TIMES: the record's window (ISO 8601), set by create/update
+    /// options, never a data field. Outside it the server hides the record
+    /// from every reader except its author (and your dashboard and server).
+    /// nil = no bound.
+    public let showFrom: String?
+    public let showUntil: String?
+    /// RANKABLE: on a ranked list (`sort: .by("score")`), this record's place —
+    /// 1 + how many records the same list admits with a better value; ties
+    /// share a rank ("1, 2, 2, 4"). nil on any other list.
+    public let rank: Int?
 
     init(json: [String: JSONValue]) {
         id = json["id"]?.string ?? ""
@@ -83,6 +93,9 @@ public struct GemmeinRecord: Sendable, Equatable {
         chosen = (json["mine"]?.object ?? [:]).compactMapValues { $0.string }
         flaggedBy = (json["flaggedBy"]?.object ?? [:]).mapValues { ($0.array ?? []).compactMap { $0.string } }
         recipients = json["recipients"]?.array?.compactMap { $0.string }
+        showFrom = json["showFrom"]?.string
+        showUntil = json["showUntil"]?.string
+        rank = json["rank"]?.int
     }
 }
 
@@ -116,8 +129,55 @@ public struct ListResult: Sendable, Equatable {
     }
 }
 
-public enum ListSort: String, Sendable {
+/// RANKABLE: a ranked list's direction — highest first (the default) or
+/// lowest first (fastest times).
+public enum RankOrder: String, Sendable {
+    case desc, asc
+}
+
+/// The list order: the three named orders, or `.by(field)` — a number field
+/// the collection declares rankable (`"rankable": ["score"]` in
+/// gemmein/collections/<name>.json). A ranked list orders only the records
+/// this person may already read and carries `rank` on each; a record with no
+/// number in the field isn't in it. Not with `since`.
+public enum ListSort: Sendable, Equatable {
     case newest, oldest, updated
+    case by(String, order: RankOrder = .desc)
+}
+
+/// SHOW / HIDE TIMES on `update`: set a bound, or clear it. (On `create` a
+/// bound is a plain `Date`.)
+public enum ShowBound: Sendable, Equatable {
+    case at(Date)
+    case clear
+}
+
+/// The instant as the JS SDK writes a Date (ISO 8601, milliseconds, Z).
+func isoInstant(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.string(from: date)
+}
+
+/// The window options on the wire — `create`'s dates, `update`'s bounds (an
+/// empty value clears).
+func showPairs(from: Date?, until: Date?) -> [(String, String)] {
+    var pairs: [(String, String)] = []
+    if let from { pairs.append(("showFrom", isoInstant(from))) }
+    if let until { pairs.append(("showUntil", isoInstant(until))) }
+    return pairs
+}
+
+func showPairs(from: ShowBound?, until: ShowBound?) -> [(String, String)] {
+    var pairs: [(String, String)] = []
+    for (name, bound) in [("showFrom", from), ("showUntil", until)] {
+        switch bound {
+        case .at(let date): pairs.append((name, isoInstant(date)))
+        case .clear: pairs.append((name, ""))
+        case nil: break
+        }
+    }
+    return pairs
 }
 
 /// The options `list()` and `watch()` share with the JS SDK, field for field.
@@ -173,7 +233,15 @@ public struct ListOptions: Sendable {
     var queryPairs: [(String, String)] {
         var pairs: [(String, String)] = []
         if let limit { pairs.append(("limit", String(limit))) }
-        if let sort { pairs.append(("sort", sort.rawValue)) }
+        switch sort {
+        case .newest: pairs.append(("sort", "newest"))
+        case .oldest: pairs.append(("sort", "oldest"))
+        case .updated: pairs.append(("sort", "updated"))
+        case .by(let field, let order):
+            pairs.append(("sortBy", field))
+            if order == .asc { pairs.append(("order", "asc")) }
+        case nil: break
+        }
         if let filter = self.where { pairs.append(("where", JSONCodec.string(filter))) }
         if let cursor { pairs.append(("cursor", cursor)) }
         if let search { pairs.append(("search", search)) }

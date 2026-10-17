@@ -872,6 +872,41 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(sent[2].line, "PATCH /storage/feed/r1")
     }
 
+    /// RULES SMALL BATCH (17 Oct 2026): a ranked list rides sortBy/order (the
+    /// named orders stay on sort), rank and the window come back on the
+    /// record, and showFrom/showUntil ride create and update as the JS SDK
+    /// writes them — a Date as its ISO instant, `.clear` as an empty value.
+    func testRankedListsAndShowTimesWriteTheJSSDKRequests() async throws {
+        let rec = Data(#"{"id":"r1","data":{"score":80},"version":1,"rank":2,"showFrom":"2026-11-01T09:00:00.000Z"}"#.utf8)
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"records":[{"id":"r1","data":{"score":80},"version":1,"rank":1}],"hasMore":false}"#.utf8)),
+            .init(body: Data(#"{"records":[],"hasMore":false}"#.utf8)),
+            .init(body: rec), .init(body: rec), .init(body: rec), .init(body: rec), .init(body: rec),
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        let ranked = try await g.collection("board").list(ListOptions(limit: 10, sort: .by("score")))
+        XCTAssertEqual(ranked.records.first?.rank, 1)
+        _ = try await g.collection("times").list(ListOptions(sort: .by("seconds", order: .asc)))
+        let at = Date(timeIntervalSince1970: 1_793_523_600) // 2026-11-01T09:00:00Z
+        let made = try await g.collection("drops").create(["title": "drop"], showFrom: at, showUntil: at.addingTimeInterval(86_400))
+        XCTAssertEqual(made.showFrom, "2026-11-01T09:00:00.000Z")
+        XCTAssertEqual(made.rank, 2)
+        _ = try await g.collection("drops").update("r1", [:], showUntil: .clear)
+        _ = try await g.collection("drops").update("r1", [:], showFrom: .at(at))
+        let server = try GemmeinServer(secretKey: "sk_test_1", apiURL: apiURL, session: StubURLProtocol.session())
+        _ = try await server.collection("inbox").create(["text": "tomorrow"], for: "usr_1", showFrom: at)
+        _ = try await server.collection("inbox").update("r1", [:], showFrom: .clear, showUntil: .at(at))
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "GET /storage/board?limit=10&sortBy=score")
+        XCTAssertEqual(sent[1].line, "GET /storage/times?sortBy=seconds&order=asc")
+        XCTAssertEqual(sent[2].line, "POST /storage/drops?showFrom=2026-11-01T09%3A00%3A00.000Z&showUntil=2026-11-02T09%3A00%3A00.000Z")
+        XCTAssertEqual(sent[2].json as NSDictionary?, ["title": "drop"] as NSDictionary, "never a data field")
+        XCTAssertEqual(sent[3].line, "PATCH /storage/drops/r1?showUntil=")
+        XCTAssertEqual(sent[4].line, "PATCH /storage/drops/r1?showFrom=2026-11-01T09%3A00%3A00.000Z")
+        XCTAssertEqual(sent[5].line, "POST /storage/inbox?for=usr_1&showFrom=2026-11-01T09%3A00%3A00.000Z")
+        XCTAssertEqual(sent[6].line, "PATCH /storage/inbox/r1?showFrom=&showUntil=2026-11-01T09%3A00%3A00.000Z")
+    }
+
     func testTheServerCollectionAndGrantDoors() async throws {
         StubURLProtocol.queue([
             .init(body: Data(#"{"records":[],"hasMore":false}"#.utf8)),

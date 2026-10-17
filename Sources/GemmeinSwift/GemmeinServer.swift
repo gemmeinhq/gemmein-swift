@@ -337,10 +337,11 @@ public final class ServerCollectionClient: @unchecked Sendable {
 
     // route: PATCH /storage/{collection}/{id}
     @discardableResult
-    public func update(_ id: String, _ data: [String: JSONValue], published: Bool? = nil, ifVersion: Int? = nil) async throws -> GemmeinRecord {
+    public func update(_ id: String, _ data: [String: JSONValue], published: Bool? = nil, ifVersion: Int? = nil, showFrom: ShowBound? = nil, showUntil: ShowBound? = nil) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let ifVersion { pairs.append(("ifVersion", String(ifVersion))) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
+        pairs += showPairs(from: showFrom, until: showUntil)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request("/\(percentEncodeComponent(id))\(query)", method: "PATCH", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
@@ -348,7 +349,7 @@ public final class ServerCollectionClient: @unchecked Sendable {
 
     /// Create a record from your server, under ANY rule, when the key may
     /// write this collection. Whose record it is, per rule: private · shared ·
-    /// community → `for:` its owner; admin_write · public_read → no person;
+    /// community → `for:` its owner; admin_write · public_read · app_only → no person;
     /// addressed → `for:` the recipient; direct → `from:` the author and
     /// `for:` the recipient. A missing or extra person is `person_required` /
     /// `invalid_person`; a read-only key is `scope_denied`.
@@ -359,13 +360,16 @@ public final class ServerCollectionClient: @unchecked Sendable {
         for person: String? = nil,
         from author: String? = nil,
         key: String? = nil,
-        published: Bool? = nil
+        published: Bool? = nil,
+        showFrom: Date? = nil,
+        showUntil: Date? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let person { pairs.append(("for", person)) }
         if let author { pairs.append(("from", author)) }
         if let key { pairs.append(("key", key)) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
+        pairs += showPairs(from: showFrom, until: showUntil)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request(query, method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
@@ -379,11 +383,14 @@ public final class ServerCollectionClient: @unchecked Sendable {
         _ data: [String: JSONValue],
         for recipients: [String],
         from author: String? = nil,
-        key: String? = nil
+        key: String? = nil,
+        showFrom: Date? = nil,
+        showUntil: Date? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = [("for", recipients.joined(separator: ","))]
         if let author { pairs.append(("from", author)) }
         if let key { pairs.append(("key", key)) }
+        pairs += showPairs(from: showFrom, until: showUntil)
         let body = try await request("?\(formURLEncode(pairs))", method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
     }
