@@ -61,6 +61,10 @@ public struct GemmeinRecord: Sendable, Equatable {
     /// nil = no bound.
     public let showFrom: String?
     public let showUntil: String?
+    /// BLOCKS + FOLLOWS: "followers" when the record is followers-only — read
+    /// by its author, the author's CURRENT followers, your dashboard and your
+    /// server; nobody signed out. nil = everyone the rule admits.
+    public let visibility: String?
     /// RANKABLE: on a ranked list (`sort: .by("score")`), this record's place —
     /// 1 + how many records the same list admits with a better value; ties
     /// share a rank ("1, 2, 2, 4"). nil on any other list.
@@ -95,6 +99,7 @@ public struct GemmeinRecord: Sendable, Equatable {
         recipients = json["recipients"]?.array?.compactMap { $0.string }
         showFrom = json["showFrom"]?.string
         showUntil = json["showUntil"]?.string
+        visibility = json["visibility"]?.string
         rank = json["rank"]?.int
     }
 }
@@ -117,6 +122,10 @@ public struct ListResult: Sendable, Equatable {
     public let total: Int?
     /// With `ListOptions(count: true)`, past 10,000: show "10,000+".
     public let totalAtLeast: Int?
+    /// BLOCKS + FOLLOWS: on a delta read (`since`), true when this person's
+    /// follows or blocks changed since that instant — re-list in full and
+    /// REPLACE what you hold (`watch()` does it: `initial == true`).
+    public let resync: Bool
 
     init(json: [String: JSONValue]) {
         records = (json["records"]?.array ?? []).compactMap { $0.object.map { GemmeinRecord(json: $0) } }
@@ -126,6 +135,7 @@ public struct ListResult: Sendable, Equatable {
         watermark = json["watermark"]?.string
         total = json["total"]?.int
         totalAtLeast = json["totalAtLeast"]?.int
+        resync = json["resync"]?.bool ?? false
     }
 }
 
@@ -150,6 +160,26 @@ public enum ListSort: Sendable, Equatable {
 public enum ShowBound: Sendable, Equatable {
     case at(Date)
     case clear
+}
+
+/// BLOCKS + FOLLOWS: who reads a record on a community or shared collection —
+/// `.followers` (only the author's current followers, besides the author),
+/// `.circle(id)` (only that circle's current members — CIRCLES) or
+/// `.everyone` (the rule decides — the default).
+public struct RecordVisibility: Sendable, Equatable, Hashable {
+    /// The value on the wire: "followers", "circle:<id>" or "everyone".
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public static let followers = RecordVisibility(rawValue: "followers")
+    public static let everyone = RecordVisibility(rawValue: "everyone")
+    /// A circle you are in (`circles.create` answers its id).
+    public static func circle(_ circleId: String) -> RecordVisibility { RecordVisibility(rawValue: "circle:\(circleId)") }
+}
+
+/// The visibility option on the wire.
+func visibilityPairs(_ visibility: RecordVisibility?) -> [(String, String)] {
+    guard let visibility else { return [] }
+    return [("visibility", visibility.rawValue)]
 }
 
 /// The instant as the JS SDK writes a Date (ISO 8601, milliseconds, Z).
@@ -548,7 +578,7 @@ public struct UploadedFile: Sendable, Equatable {
 /// out of (past its cap, or the shared byte budget) — empty when whole.
 public struct AccountExport: Sendable, Equatable {
     /// The document's top-level keys, in the order the JS type declares them.
-    public static let keys = ["exportVersion", "about", "exportedAt", "app", "person", "records", "recordCount", "marks", "files", "purchases", "subscription", "credits", "access", "aiCalls", "runs", "emails", "support", "sessions", "signIns", "limits"]
+    public static let keys = ["exportVersion", "about", "exportedAt", "app", "person", "records", "recordCount", "marks", "files", "people", "purchases", "subscription", "credits", "access", "aiCalls", "runs", "emails", "support", "sessions", "signIns", "limits"]
 
     /// The cover (GDPR Art. 15(1) supplementary information).
     public struct About: Sendable, Equatable {
@@ -618,6 +648,19 @@ public struct AccountExport: Sendable, Equatable {
         public let createdAt: String
         public let url: String
         public let urlExpiresAt: String?
+    }
+    /// Who they follow and who they blocked (with since); their followers
+    /// counted — never who blocked them. Their private setting, the follow
+    /// requests they sent (requests waiting for them counted), and the
+    /// circles they are in.
+    public struct People: Sendable, Equatable {
+        public let following: [PersonEdge]
+        public let followers: Int
+        public let blocked: [PersonEdge]
+        public let `private`: Bool
+        public let requested: [PersonEdge]
+        public let requestsWaiting: Int
+        public let circles: [CircleInfo]
     }
     /// The same summary `purchases.mine()` answers, with its payment reference.
     public struct Purchase: Sendable, Equatable {
@@ -725,7 +768,7 @@ public struct AccountExport: Sendable, Equatable {
     public struct Limits: Sendable, Equatable {
         /// Each section's cap.
         public struct Caps: Sendable, Equatable {
-            public static let keys = ["records", "files", "marks", "purchases", "aiCalls", "runs", "creditLedger", "emails", "sessions", "signIns", "support"]
+            public static let keys = ["records", "files", "marks", "purchases", "aiCalls", "runs", "creditLedger", "emails", "sessions", "signIns", "support", "following", "blocked", "requested", "circles"]
             public let records: Int
             public let files: Int
             public let marks: Int
@@ -737,6 +780,10 @@ public struct AccountExport: Sendable, Equatable {
             public let sessions: Int
             public let signIns: Int
             public let support: Int
+            public let following: Int
+            public let blocked: Int
+            public let requested: Int
+            public let circles: Int
         }
         public let caps: Caps
         /// The UTF-8 byte budget records, AI calls, runs and support messages share.
@@ -755,6 +802,7 @@ public struct AccountExport: Sendable, Equatable {
     public let recordCount: Int
     public let marks: [Mark]
     public let files: [File]
+    public let people: People
     public let purchases: [Purchase]
     public let subscription: Subscription?
     public let credits: Credits
@@ -802,6 +850,11 @@ public struct AccountExport: Sendable, Equatable {
                  name: f["name"]?.string, contentType: f["contentType"]?.string ?? "", sizeBytes: f["sizeBytes"]?.int,
                  createdAt: f["createdAt"]?.string ?? "", url: f["url"]?.string ?? "", urlExpiresAt: f["urlExpiresAt"]?.string)
         }
+        let pe = json["people"]?.object ?? [:]
+        people = People(following: objects(pe["following"]).map { PersonEdge(json: $0) }, followers: pe["followers"]?.int ?? 0,
+                        blocked: objects(pe["blocked"]).map { PersonEdge(json: $0) }, private: pe["private"]?.bool ?? false,
+                        requested: objects(pe["requested"]).map { PersonEdge(json: $0) }, requestsWaiting: pe["requestsWaiting"]?.int ?? 0,
+                        circles: objects(pe["circles"]).map { CircleInfo(json: $0) })
         purchases = objects(json["purchases"]).map { x in
             Purchase(item: x["item"]?.string ?? "", kind: x["kind"]?.string ?? "", paymentRef: x["paymentRef"]?.string,
                      amountMinor: x["amountMinor"]?.int, currency: x["currency"]?.string, refundedMinor: x["refundedMinor"]?.int ?? 0,
@@ -855,7 +908,9 @@ public struct AccountExport: Sendable, Equatable {
         limits = Limits(
             caps: .init(records: k["records"]?.int ?? 0, files: k["files"]?.int ?? 0, marks: k["marks"]?.int ?? 0, purchases: k["purchases"]?.int ?? 0,
                         aiCalls: k["aiCalls"]?.int ?? 0, runs: k["runs"]?.int ?? 0, creditLedger: k["creditLedger"]?.int ?? 0, emails: k["emails"]?.int ?? 0,
-                        sessions: k["sessions"]?.int ?? 0, signIns: k["signIns"]?.int ?? 0, support: k["support"]?.int ?? 0),
+                        sessions: k["sessions"]?.int ?? 0, signIns: k["signIns"]?.int ?? 0, support: k["support"]?.int ?? 0,
+                        following: k["following"]?.int ?? 0, blocked: k["blocked"]?.int ?? 0,
+                        requested: k["requested"]?.int ?? 0, circles: k["circles"]?.int ?? 0),
             textBudgetBytes: l["textBudgetBytes"]?.int ?? 0,
             truncated: strings(l["truncated"])
         )

@@ -414,6 +414,7 @@ final class WireTests: XCTestCase {
      "marks":[{"recordId":"rec_2","field":"likes","createdAt":"2026-10-02T11:00:00.000Z"}],
      "files":[{"ref":"file:aaa","collection":"notes","relation":"uploader","name":"cv.pdf","contentType":"application/pdf","sizeBytes":1024,"createdAt":"2026-10-03T10:00:00.000Z","url":"https://files.example/aaa?sig=1","urlExpiresAt":"2026-10-09T10:05:00.000Z"},
               {"ref":"file:bbb","collection":"gallery","relation":"reader","name":null,"contentType":"image/png","sizeBytes":null,"createdAt":"2026-10-03T11:00:00.000Z","url":"https://cdn.example/bbb.png"}],
+     "people":{"following":[{"userId":"usr_2","since":"2026-10-05T10:00:00.000Z"}],"followers":3,"blocked":[],"private":true,"requested":[{"userId":"usr_3","since":"2026-10-05T10:00:00.000Z"}],"requestsWaiting":2,"circles":[{"id":"cir_1","name":"close","createdBy":"usr_1","members":3,"you":"creator","createdAt":"2026-10-05T10:00:00.000Z"}]},
      "purchases":[{"item":"Pro","kind":"subscription","paymentRef":"pi_1","amountMinor":1500,"currency":"gbp","refundedMinor":500,"status":"part_refunded","grants":["access:pro"],"paidAt":"2026-09-02T10:00:00.000Z"}],
      "subscription":{"plan":"Pro","status":"active","since":"2026-09-02T10:00:00.000Z","lastEventAt":null},
      "credits":{"balance":{"balance":12,"reserved":3,"expiring":{"credits":5,"at":"2026-11-01T00:00:00.000Z"}},
@@ -429,7 +430,7 @@ final class WireTests: XCTestCase {
                              {"direction":"to_person","subject":"Re: Refund?","text":"Done.","attachments":[],"at":"2026-10-08T12:00:00.000Z"}]}],
      "sessions":[{"id":"ses_1","createdAt":"2026-10-09T09:59:00.000Z","expiresAt":"2026-11-08T09:59:00.000Z","revokedAt":null}],
      "signIns":[{"event":"email_verify","at":"2026-10-09T09:59:00.000Z","allowed":true,"ip":"203.0.113.9"}],
-     "limits":{"caps":{"records":5000,"files":1000,"marks":1000,"purchases":1000,"aiCalls":1000,"runs":199,"creditLedger":199,"emails":99,"sessions":500,"signIns":500,"support":200},
+     "limits":{"caps":{"records":5000,"files":1000,"marks":1000,"purchases":1000,"aiCalls":1000,"runs":199,"creditLedger":199,"emails":99,"sessions":500,"signIns":500,"support":200,"following":5000,"blocked":1000,"requested":500,"circles":5000},
                "textBudgetBytes":26214400,"truncated":["records","support"]}}
     """#
 
@@ -481,7 +482,14 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(export.support[0].messages[0].attachments, ["receipt.pdf"])
         XCTAssertEqual(export.sessions.first?.expiresAt, "2026-11-08T09:59:00.000Z")
         XCTAssertEqual(export.signIns, [.init(event: "email_verify", at: "2026-10-09T09:59:00.000Z", allowed: true, ip: "203.0.113.9")])
-        XCTAssertEqual(export.limits.caps, .init(records: 5000, files: 1000, marks: 1000, purchases: 1000, aiCalls: 1000, runs: 199, creditLedger: 199, emails: 99, sessions: 500, signIns: 500, support: 200))
+        XCTAssertEqual(export.limits.caps, .init(records: 5000, files: 1000, marks: 1000, purchases: 1000, aiCalls: 1000, runs: 199, creditLedger: 199, emails: 99, sessions: 500, signIns: 500, support: 200, following: 5000, blocked: 1000, requested: 500, circles: 5000))
+        XCTAssertEqual(export.people.following.map(\.userId), ["usr_2"])
+        XCTAssertEqual(export.people.private, true)
+        XCTAssertEqual(export.people.requested.map(\.userId), ["usr_3"])
+        XCTAssertEqual(export.people.requestsWaiting, 2)
+        XCTAssertEqual(export.people.circles.map(\.name), ["close"])
+        XCTAssertEqual(export.people.followers, 3)
+        XCTAssertEqual(export.people.blocked, [])
         XCTAssertEqual(export.limits.textBudgetBytes, 26_214_400)
         XCTAssertEqual(export.limits.truncated, ["records", "support"], "an app is told which sections were cut")
         XCTAssertFalse(try export.jsonData().isEmpty)
@@ -905,6 +913,132 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(sent[4].line, "PATCH /storage/drops/r1?showFrom=2026-11-01T09%3A00%3A00.000Z")
         XCTAssertEqual(sent[5].line, "POST /storage/inbox?for=usr_1&showFrom=2026-11-01T09%3A00%3A00.000Z")
         XCTAssertEqual(sent[6].line, "PATCH /storage/inbox/r1?showFrom=&showUntil=2026-11-01T09%3A00%3A00.000Z")
+    }
+
+    func testPrivateAccountsRequestsAndCirclesWriteTheJSSDKRequests() async throws {
+        let rel = Data(#"{"userId":"usr_2","following":false,"followsYou":false,"friends":false,"blocking":false,"requested":true,"requestedYou":false,"private":true,"counts":{"followers":4,"following":1}}"#.utf8)
+        let page = Data(#"{"people":[{"userId":"usr_2","since":"2026-10-20T10:00:00.000Z"}],"hasMore":false}"#.utf8)
+        let circle = Data(#"{"id":"cir_1","name":"Close friends","createdBy":"usr_1","members":2,"you":"creator","createdAt":"2026-10-20T10:00:00.000Z"}"#.utf8)
+        let rec = Data(#"{"id":"r1","data":{"title":"t"},"version":1,"visibility":"circle:cir_1"}"#.utf8)
+        StubURLProtocol.queue([
+            .init(body: rel), .init(body: page), .init(body: page), .init(body: page), .init(body: page), .init(body: rel), .init(body: rel),
+            .init(body: Data(#"{"private":false,"accepted":2}"#.utf8)),
+            .init(body: Data(#"{"following":1,"followers":4,"blocked":0,"requests":2,"private":true}"#.utf8)),
+            .init(body: circle), .init(body: Data(#"{"circles":[],"hasMore":false}"#.utf8)), .init(body: circle), .init(body: page), .init(body: circle), .init(body: circle),
+            .init(body: Data(#"{"left":true,"circleId":"cir_1","transferredTo":"usr_2"}"#.utf8)), .init(body: Data(#"{"disbanded":true,"circleId":"cir_1"}"#.utf8)),
+            .init(body: rec),
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        let r = try await g.people.relationship("usr_2")
+        XCTAssertEqual([r.requested, r.private], [true, true])
+        XCTAssertEqual(r.counts, ProfileCounts(followers: 4, following: 1))
+        _ = try await g.people.followersOf("usr_2")
+        _ = try await g.people.followingOf("usr_2", limit: 5)
+        _ = try await g.people.requests()
+        _ = try await g.people.requested(cursor: "c1")
+        _ = try await g.people.accept("usr_2")
+        _ = try await g.people.decline("usr_2")
+        let off = try await g.people.setPrivate(false)
+        XCTAssertEqual(off, PrivacySetting(private: false, accepted: 2))
+        let counts = try await g.people.counts()
+        XCTAssertEqual([counts.requests], [2])
+        XCTAssertTrue(counts.private)
+        let made = try await g.circles.create("Close friends")
+        XCTAssertEqual([made.id, made.you], ["cir_1", "creator"])
+        _ = try await g.circles.list()
+        _ = try await g.circles.get("cir_1")
+        _ = try await g.circles.members("cir_1", limit: 10)
+        _ = try await g.circles.add("cir_1", "usr_2")
+        _ = try await g.circles.remove("cir_1", "usr_2")
+        let left = try await g.circles.leave("cir_1", transferTo: "usr_2")
+        XCTAssertEqual(left.transferredTo, "usr_2")
+        try await g.circles.disband("cir_1")
+        let post = try await g.collection("posts").create(["title": "t"], visibility: .circle("cir_1"))
+        XCTAssertEqual(post.visibility, "circle:cir_1")
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent.map(\.line), [
+            "GET /auth/people/usr_2",
+            "GET /auth/people?list=followers&of=usr_2",
+            "GET /auth/people?list=following&of=usr_2&limit=5",
+            "GET /auth/people?list=requests",
+            "GET /auth/people?list=requested&cursor=c1",
+            "POST /auth/people/usr_2/accept",
+            "POST /auth/people/usr_2/decline",
+            "PUT /auth/people/privacy",
+            "GET /auth/people",
+            "POST /auth/circles",
+            "GET /auth/circles",
+            "GET /auth/circles/cir_1",
+            "GET /auth/circles/cir_1/members?limit=10",
+            "POST /auth/circles/cir_1/members/usr_2",
+            "DELETE /auth/circles/cir_1/members/usr_2",
+            "POST /auth/circles/cir_1/leave",
+            "DELETE /auth/circles/cir_1",
+            "POST /storage/posts?visibility=circle%3Acir_1",
+        ])
+        XCTAssertEqual(sent[7].json as NSDictionary?, ["private": false] as NSDictionary)
+        XCTAssertEqual(sent[9].json as NSDictionary?, ["name": "Close friends"] as NSDictionary)
+        XCTAssertEqual(sent[15].json as NSDictionary?, ["transferTo": "usr_2"] as NSDictionary)
+    }
+
+    func testPeopleFollowsBlocksAndVisibilityWriteTheJSSDKRequests() async throws {
+        let rel = Data(#"{"userId":"usr_2","following":true,"followsYou":true,"friends":true,"blocking":false}"#.utf8)
+        let page = Data(#"{"people":[{"userId":"usr_2","since":"2026-10-20T10:00:00.000Z"}],"hasMore":true,"cursor":"c1"}"#.utf8)
+        let rec = Data(#"{"id":"r1","data":{"title":"t"},"version":1,"visibility":"followers"}"#.utf8)
+        StubURLProtocol.queue([
+            .init(body: rel), .init(body: rel), .init(body: rel), .init(body: rel), .init(body: rel),
+            .init(body: page), .init(body: page), .init(body: page), .init(body: page),
+            .init(body: Data(#"{"following":3,"followers":2,"blocked":1}"#.utf8)),
+            .init(body: rec), .init(body: rec),
+            .init(body: Data(#"{"records":[],"hasMore":false,"deleted":[],"resync":true}"#.utf8)),
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        let followed = try await g.people.follow("usr_2")
+        XCTAssertTrue(followed.friends)
+        _ = try await g.people.unfollow("usr_2")
+        _ = try await g.people.block("usr_2")
+        _ = try await g.people.unblock("usr_2")
+        _ = try await g.people.relationship("usr_2")
+        let following = try await g.people.following(limit: 10)
+        XCTAssertEqual(following.people.first?.userId, "usr_2")
+        XCTAssertEqual(following.cursor, "c1")
+        _ = try await g.people.followers(cursor: "c1")
+        _ = try await g.people.friends()
+        _ = try await g.people.blocked()
+        let counts = try await g.people.counts()
+        XCTAssertEqual([counts.following, counts.followers, counts.blocked], [3, 2, 1])
+        let made = try await g.collection("posts").create(["title": "t"], visibility: .followers)
+        XCTAssertEqual(made.visibility, "followers")
+        _ = try await g.collection("posts").update("r1", [:], visibility: .everyone)
+        let delta = try await g.collection("posts").list(ListOptions(since: "2026-10-20T10:00:00.000Z", author: "following"))
+        XCTAssertTrue(delta.resync)
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "POST /auth/people/usr_2/follow")
+        XCTAssertEqual(sent[1].line, "DELETE /auth/people/usr_2/follow")
+        XCTAssertEqual(sent[2].line, "POST /auth/people/usr_2/block")
+        XCTAssertEqual(sent[3].line, "DELETE /auth/people/usr_2/block")
+        XCTAssertEqual(sent[4].line, "GET /auth/people/usr_2")
+        XCTAssertEqual(sent[5].line, "GET /auth/people?list=following&limit=10")
+        XCTAssertEqual(sent[6].line, "GET /auth/people?list=followers&cursor=c1")
+        XCTAssertEqual(sent[7].line, "GET /auth/people?list=friends")
+        XCTAssertEqual(sent[8].line, "GET /auth/people?list=blocked")
+        XCTAssertEqual(sent[9].line, "GET /auth/people")
+        XCTAssertEqual(sent[10].line, "POST /storage/posts?visibility=followers")
+        XCTAssertEqual(sent[10].json as NSDictionary?, ["title": "t"] as NSDictionary, "never a data field")
+        XCTAssertEqual(sent[11].line, "PATCH /storage/posts/r1?visibility=everyone")
+    }
+
+    func testFollowersFileUploadSendsVisibility() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"fileId":"file_1","uploadUrl":"https://s3.test/up","fields":{"key":"k"}}"#.utf8)),
+            .init(status: 204, body: Data()),
+            .init(body: Data(#"{"id":"file_1","ref":"file:00000000-0000-0000-0000-000000000001","contentType":"image/png","sizeBytes":3}"#.utf8)),
+        ])
+        let (g, _) = try client(token: "gm_sess_1")
+        _ = try await g.collection("gallery").upload(Data([1, 2, 3]), name: "p.png", contentType: "image/png", visibility: .followers)
+        let presign = StubURLProtocol.captured[0]
+        XCTAssertEqual(presign.line, "POST /storage/gallery/upload")
+        XCTAssertEqual(presign.json?["visibility"] as? String, "followers")
     }
 
     func testTheServerCollectionAndGrantDoors() async throws {

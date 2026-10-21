@@ -29,6 +29,11 @@ public final class Gemmein: @unchecked Sendable {
     /// The person's runs on job tools (generate · transcribe): start, watch,
     /// read and cancel.
     public let runs: RunsClient
+    /// THREE JOBS: call a relay by name — a user's action that costs credits (spend_credits).
+    public let relays: RelaysClient
+    /// The signed-in person's follows and blocks.
+    public let people: PeopleClient
+    public let circles: CirclesClient
 
     /// Where the session lives. On Apple platforms the default is the
     /// Keychain, so a relaunch keeps the person signed in.
@@ -86,6 +91,9 @@ public final class Gemmein: @unchecked Sendable {
         self.credits = CreditsClient(config: config)
         self.ai = AiClient(config: config)
         self.runs = RunsClient(config: config)
+        self.relays = RelaysClient(config: config)
+        self.people = PeopleClient(config: config)
+        self.circles = CirclesClient(config: config)
     }
 
     /// Your app's data — `g.collection("notes")`. The canonical spelling;

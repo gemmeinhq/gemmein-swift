@@ -86,13 +86,15 @@ public final class CollectionClient: @unchecked Sendable {
         for recipient: String? = nil,
         published: Bool? = nil,
         showFrom: Date? = nil,
-        showUntil: Date? = nil
+        showUntil: Date? = nil,
+        visibility: RecordVisibility? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let key { pairs.append(("key", key)) }
         if let recipient { pairs.append(("for", recipient)) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
         pairs += showPairs(from: showFrom, until: showUntil)
+        pairs += visibilityPairs(visibility)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request(query, method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
@@ -108,13 +110,15 @@ public final class CollectionClient: @unchecked Sendable {
         for recipients: [String],
         published: Bool? = nil,
         showFrom: Date? = nil,
-        showUntil: Date? = nil
+        showUntil: Date? = nil,
+        visibility: RecordVisibility? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let key { pairs.append(("key", key)) }
         pairs.append(("for", recipients.joined(separator: ",")))
         if let published { pairs.append(("published", published ? "true" : "false")) }
         pairs += showPairs(from: showFrom, until: showUntil)
+        pairs += visibilityPairs(visibility)
         let body = try await request("?\(formURLEncode(pairs))", method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
     }
@@ -190,7 +194,13 @@ public final class CollectionClient: @unchecked Sendable {
                 if state.takeWakeRequest() { resync = true; delay = interval }
                 if Task.isCancelled { return }
                 do {
-                    let page = try await self.page(base: base, since: resync ? nil : state.watermarkValue)
+                    var page = try await self.page(base: base, since: resync ? nil : state.watermarkValue)
+                    // BLOCKS + FOLLOWS: this person's follows or blocks changed
+                    // since the watermark — re-list in full and replace.
+                    if page.resync && !resync && !Task.isCancelled {
+                        resync = true
+                        page = try await self.page(base: base, since: nil)
+                    }
                     if Task.isCancelled { return }
                     if let mark = page.mark { state.watermarkValue = mark }
                     delay = interval
@@ -251,12 +261,14 @@ public final class CollectionClient: @unchecked Sendable {
         ifVersion: Int? = nil,
         published: Bool? = nil,
         showFrom: ShowBound? = nil,
-        showUntil: ShowBound? = nil
+        showUntil: ShowBound? = nil,
+        visibility: RecordVisibility? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let ifVersion { pairs.append(("ifVersion", String(ifVersion))) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
         pairs += showPairs(from: showFrom, until: showUntil)
+        pairs += visibilityPairs(visibility)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request("/\(percentEncodeComponent(id))\(query)", method: "PATCH", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
@@ -293,17 +305,23 @@ public final class CollectionClient: @unchecked Sendable {
     /// (mp4/webm/mov) 500 MB (25/50 MB in Development), which play inline.
     /// A document always downloads — link it with `intent: .download`.
     /// `for:` names ONE other person who may read this file (addressed and
-    /// direct collections only). There is deliberately no `url` here: a URL
-    /// that outlives a refund is the bug this replaced.
+    /// direct collections only). `visibility: .followers` (community and
+    /// shared) stores it on the signed, short-lived path from the start —
+    /// linked only for you, the people who follow you NOW, the app's
+    /// dashboard and the app's server key (never signed out); a
+    /// followers-only post carries only such files, at any depth
+    /// (`file_is_public` otherwise). There is deliberately no `url` here: a URL that outlives a
+    /// refund is the bug this replaced.
     // route: POST /storage/{collection}/upload
     // route: POST /storage/{collection}/upload/{fileId}/confirm
     public func upload(
         _ data: Data,
         name: String = "upload",
         contentType: String = "",
-        for recipient: String? = nil
+        for recipient: String? = nil,
+        visibility: RecordVisibility? = nil
     ) async throws -> UploadedFile {
-        try await upload(data, name: name, contentType: contentType, forValue: recipient)
+        try await upload(data, name: name, contentType: contentType, forValue: recipient, visibility: visibility)
     }
 
     /// GROUP CHATS: `for: [id, id, …]` on a direct collection names up to 20
@@ -323,11 +341,12 @@ public final class CollectionClient: @unchecked Sendable {
         try await upload(data, name: name, contentType: contentType, forValue: recipients)
     }
 
-    private func upload(_ data: Data, name: String, contentType: String, forValue: Any?) async throws -> UploadedFile {
+    private func upload(_ data: Data, name: String, contentType: String, forValue: Any?, visibility: RecordVisibility? = nil) async throws -> UploadedFile {
         // Step 1: the presign. The server refuses a presign that declares
         // nothing — it cannot accept an empty file.
         var presignFields: [String: Any] = ["name": name, "size": data.count, "contentType": contentType]
         if let forValue { presignFields["for"] = forValue }
+        if let visibility, visibility != .everyone { presignFields["visibility"] = visibility.rawValue }
         let presign = try requireObject(
             try await request("/upload", method: "POST", body: try JSONCodec.encode(presignFields)),
             "an upload"
@@ -371,7 +390,7 @@ public final class CollectionClient: @unchecked Sendable {
 
     // ── internals ────────────────────────────────────────────────────────
 
-    private func page(base: ListOptions, since: String?) async throws -> (records: [GemmeinRecord], deleted: [String], mark: String?) {
+    private func page(base: ListOptions, since: String?) async throws -> (records: [GemmeinRecord], deleted: [String], mark: String?, resync: Bool) {
         var records: [GemmeinRecord] = []
         var deleted: [String] = []
         var cursor: String?
@@ -381,6 +400,7 @@ public final class CollectionClient: @unchecked Sendable {
             options.cursor = cursor
             options.since = since
             let result = try await list(options)
+            if since != nil && result.resync { return ([], [], nil, true) }
             records.append(contentsOf: result.records)
             deleted.append(contentsOf: result.deleted)
             cursor = result.hasMore ? result.cursor : nil
@@ -393,7 +413,7 @@ public final class CollectionClient: @unchecked Sendable {
                 mark = result.watermark
             }
         } while cursor != nil && !Task.isCancelled
-        return (records, deleted, mark)
+        return (records, deleted, mark, false)
     }
 
     private func request(_ suffix: String, method: String = "GET", body: Data? = nil) async throws -> JSONValue? {

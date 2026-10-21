@@ -337,11 +337,12 @@ public final class ServerCollectionClient: @unchecked Sendable {
 
     // route: PATCH /storage/{collection}/{id}
     @discardableResult
-    public func update(_ id: String, _ data: [String: JSONValue], published: Bool? = nil, ifVersion: Int? = nil, showFrom: ShowBound? = nil, showUntil: ShowBound? = nil) async throws -> GemmeinRecord {
+    public func update(_ id: String, _ data: [String: JSONValue], published: Bool? = nil, ifVersion: Int? = nil, showFrom: ShowBound? = nil, showUntil: ShowBound? = nil, visibility: RecordVisibility? = nil) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let ifVersion { pairs.append(("ifVersion", String(ifVersion))) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
         pairs += showPairs(from: showFrom, until: showUntil)
+        pairs += visibilityPairs(visibility)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request("/\(percentEncodeComponent(id))\(query)", method: "PATCH", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))
@@ -362,7 +363,8 @@ public final class ServerCollectionClient: @unchecked Sendable {
         key: String? = nil,
         published: Bool? = nil,
         showFrom: Date? = nil,
-        showUntil: Date? = nil
+        showUntil: Date? = nil,
+        visibility: RecordVisibility? = nil
     ) async throws -> GemmeinRecord {
         var pairs: [(String, String)] = []
         if let person { pairs.append(("for", person)) }
@@ -370,6 +372,7 @@ public final class ServerCollectionClient: @unchecked Sendable {
         if let key { pairs.append(("key", key)) }
         if let published { pairs.append(("published", published ? "true" : "false")) }
         pairs += showPairs(from: showFrom, until: showUntil)
+        pairs += visibilityPairs(visibility)
         let query = pairs.isEmpty ? "" : "?\(formURLEncode(pairs))"
         let body = try await request(query, method: "POST", body: try JSONCodec.encode(data))
         return GemmeinRecord(json: try requireObject(body, "a record"))

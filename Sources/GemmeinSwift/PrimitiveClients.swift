@@ -213,6 +213,60 @@ public final class CreditsClient: @unchecked Sendable {
     }
 }
 
+/// THREE JOBS — your app calls a relay by name (its trigger is `{ "kind": "app_call" }`).
+/// This is how a user's ACTION costs credits: the relay's first action, `spend_credits`,
+/// takes the signed-in person's OWN credits before anything is written — or refuses with
+/// `credits_exhausted` (402) and nothing else runs — then its other actions run. An iPhone
+/// app holds no key; the person is whoever is signed in, never a field you send.
+///
+///     let result = try await g.relays.call("book-class", input: ["class": .string(id)], key: tapId)
+///
+/// Pass `key` so a retry after a dropped connection answers the SAME run — never a second
+/// charge. If what the charge pays for fails the credits are refunded and it throws
+/// `relay_failed`; once that is done the charge stands (a later step retries).
+/// Refusals throw GemmeinError with `code`: session_required · credits_exhausted ·
+/// not_callable · call_in_progress (ask again with the same key) · call_not_finished ·
+/// input_too_large · too_many_calls · daily_cap ·
+/// relay_failed · relay_paused.
+public final class RelaysClient: @unchecked Sendable {
+    private let config: ClientConfig
+
+    init(config: ClientConfig) { self.config = config }
+
+    // route: POST /relays/{name}/call
+    public func call(_ name: String, input: JSONValue = .null, key: String? = nil) async throws -> RelayCallResult {
+        var fields: [String: JSONValue] = ["input": input]
+        if let key { fields["key"] = .string(key) }
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? name
+        let body = try requireObject(try await runtimeRequest(config, "/relays/\(encoded)/call", method: "POST", body: try JSONCodec.encode(fields), extraHeaders: ["content-type": "application/json"]), "a relay call")
+        // 202: the first call with this key is still working — ask again with the SAME key.
+        if body["code"]?.string == "call_in_progress" {
+            throw GemmeinError(status: 202, code: "call_in_progress", message: body["message"]?.string ?? "still working — ask again with the same key")
+        }
+        let records: [RelayCallRecord] = (body["records"]?.array ?? []).compactMap { item in
+            guard let o = item.object, let collection = o["collection"]?.string, let id = o["id"]?.string else { return nil }
+            return RelayCallRecord(collection: collection, id: id)
+        }
+        return RelayCallResult(runId: body["run"]?.object?["id"]?.string ?? "", spent: body["spent"]?.int, balance: body["balance"]?.int, records: records, deduped: body["deduped"]?.bool ?? false)
+    }
+}
+
+/// One record a relay call wrote.
+public struct RelayCallRecord: Sendable {
+    public let collection: String
+    public let id: String
+}
+
+/// What a relay call answers: what it charged (0 on a deduped retry; nil when the relay
+/// charges nothing), the balance after, and the records the relay wrote.
+public struct RelayCallResult: Sendable {
+    public let runId: String
+    public let spent: Int?
+    public let balance: Int?
+    public let records: [RelayCallRecord]
+    public let deduped: Bool
+}
+
 /// Your app's collections.
 public final class StorageClient: @unchecked Sendable {
     private let config: ClientConfig

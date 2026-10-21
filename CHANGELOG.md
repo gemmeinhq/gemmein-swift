@@ -12,6 +12,19 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-10-21
+
+Pinned to `@gemmein/sdk` 0.21.0 and engine 0.27.0.
+
+- `g.people` (`PeopleClient`): follow, unfollow, block, unblock,
+  relationship, following, followers, friends, blocked, counts, followersOf,
+  followingOf, requests, requested, accept, decline, setPrivate; and
+  `g.circles` (`CirclesClient`): create, list, get, members, add, remove,
+  leave, disband.
+- `RecordVisibility` (`.followers`, `.everyone`, `.circle(id)`) on `create`,
+  `update` and `upload`; `ListOptions(author: "following")`.
+- `g.relays.call(_:input:key:)` calls a relay by name.
+
 ## [0.20.0] — 2026-10-18
 
 Pinned to `@gemmein/sdk` 0.20.0 and engine 0.26.0.
