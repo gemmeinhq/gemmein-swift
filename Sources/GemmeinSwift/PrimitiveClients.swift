@@ -227,7 +227,8 @@ public final class CreditsClient: @unchecked Sendable {
 /// Refusals throw GemmeinError with `code`: session_required · credits_exhausted ·
 /// not_callable · call_in_progress (ask again with the same key) · call_not_finished ·
 /// input_too_large · too_many_calls · daily_cap ·
-/// relay_failed · relay_paused.
+/// relay_failed · relay_paused. A relay that runs a hosted function (run_function) answers
+/// with `output`; function_paused · function_busy · function_timeout say it could not run now.
 public final class RelaysClient: @unchecked Sendable {
     private let config: ClientConfig
 
@@ -247,7 +248,7 @@ public final class RelaysClient: @unchecked Sendable {
             guard let o = item.object, let collection = o["collection"]?.string, let id = o["id"]?.string else { return nil }
             return RelayCallRecord(collection: collection, id: id)
         }
-        return RelayCallResult(runId: body["run"]?.object?["id"]?.string ?? "", spent: body["spent"]?.int, balance: body["balance"]?.int, records: records, deduped: body["deduped"]?.bool ?? false)
+        return RelayCallResult(runId: body["run"]?.object?["id"]?.string ?? "", spent: body["spent"]?.int, balance: body["balance"]?.int, records: records, deduped: body["deduped"]?.bool ?? false, output: body["output"])
     }
 }
 
@@ -265,6 +266,8 @@ public struct RelayCallResult: Sendable {
     public let balance: Int?
     public let records: [RelayCallRecord]
     public let deduped: Bool
+    /// EDGE: the relay's last run_function answer (nil when the relay runs no function).
+    public let output: JSONValue?
 }
 
 /// Your app's collections.

@@ -12,6 +12,14 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-10-25
+
+Pinned to `@gemmein/sdk` 0.23.0 and engine 0.29.0. Two minor bumps folded into
+one, as in the JS SDK — 0.28.0's content, then 0.29.0's.
+
+- `RelayCallResult.output` — EDGE: the relay's last `run_function` answer
+  (`nil` when the relay runs no function), as in the JS SDK's `RelaysClient.call`.
+
 ## [0.21.0] — 2026-10-21
 
 Pinned to `@gemmein/sdk` 0.21.0 and engine 0.27.0.
