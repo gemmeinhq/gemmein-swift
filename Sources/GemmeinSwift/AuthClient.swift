@@ -49,6 +49,56 @@ public final class AuthClient: @unchecked Sendable {
         )
     }
 
+    /// GOOGLE SIGN-IN: call this FIRST, before asking Google's own sign-in
+    /// SDK (GoogleSignIn-iOS, outside this package) for an ID token — pass
+    /// the nonce it returns as the `nonce` Google signs into the token.
+    /// Gemmein's apps share one Google client; this nonce is what proves
+    /// the token your app gets back was requested by YOUR app, not relayed
+    /// from another one (R2, Google-security review, 3 Nov 2026 night — the
+    /// prior "mint a fresh nonce yourself" teaching below was wrong: the
+    /// engine refuses any nonce it didn't mint). Single-use, short-lived
+    /// (10 minutes) — call it once per attempt, right before starting one.
+    // route: GET /auth/google/nonce
+    public func getGoogleNonce() async throws -> String {
+        let body = try requireObject(try await runtimeRequest(config, "/auth/google/nonce"), "a Google sign-in nonce")
+        guard let nonce = body["nonce"]?.string, !nonce.isEmpty else {
+            throw GemmeinError(status: 0, code: "invalid_response", message: "Gemmein did not return a Google sign-in nonce")
+        }
+        return nonce
+    }
+
+    /// GOOGLE SIGN-IN (2 Nov 2026 ruling): exchange an ID token this app
+    /// already holds — its own Google sign-in SDK on iOS, outside this
+    /// package — for a Gemmein session. No redirect: the token itself is
+    /// the proof. Call `getGoogleNonce()` first and pass its nonce into
+    /// Google's own sign-in request; the engine refuses an ID token whose
+    /// nonce it didn't mint for THIS app (`google_nonce_required`), even
+    /// one that verifies against Google perfectly otherwise, and refuses
+    /// the same token exchanged twice either way. `signInWithGoogle()` (the
+    /// web redirect) has no native equivalent here on purpose — this is the
+    /// door iOS uses instead (tests/security/sdkParity.test.ts
+    /// JS_ONLY_METHODS).
+    // route: POST /auth/google/token
+    public func exchangeIdToken(provider: String, idToken: String) async throws -> AuthSession {
+        let answer = try await runtimeRequest(
+            config,
+            "/auth/\(provider)/token",
+            method: "POST",
+            body: try JSONCodec.encode(["idToken": idToken]),
+            extraHeaders: ["content-type": "application/json"]
+        )
+        guard let body = answer?.object, let token = body["token"]?.string else {
+            throw GemmeinError(status: 0, code: "invalid_response", message: "Gemmein auth response did not include a session token")
+        }
+        try await config.tokenStore.set(token)
+        let user = body["user"]?.object ?? [:]
+        return AuthSession(
+            token: token,
+            expiresAt: body["expiresAt"]?.string ?? "",
+            user: AuthUser(id: user["id"]?.string ?? "", email: user["email"]?.string ?? "", role: user["role"]?.string)
+        )
+    }
+
     /// Sign out. Even if the network call fails the stored session is cleared —
     /// the person asked to be signed out.
     // route: POST /auth/logout

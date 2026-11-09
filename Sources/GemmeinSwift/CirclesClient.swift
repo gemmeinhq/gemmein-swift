@@ -54,7 +54,7 @@ public struct CircleLeft: Sendable, Equatable {
 ///     let close = try await g.circles.create("Close friends")
 ///     try await g.circles.add(close.id, friendId)
 ///
-/// Bounded like the JS SDK: members per circle by the app's plan (50; 250 on
+/// Bounded like the JS SDK: members per circle by the account's plan (50; 250 on
 /// Live; 1,000 on Growing — `circle_full`), 100 circles per person
 /// (`circle_limit`), 300 circle changes an hour (`too_many_changes`).
 public final class CirclesClient: @unchecked Sendable {

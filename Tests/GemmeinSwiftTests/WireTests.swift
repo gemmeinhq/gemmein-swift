@@ -45,6 +45,41 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(sent[0].json as NSDictionary?, ["email": "person@example.com"] as NSDictionary)
     }
 
+    /// R2 FIX (Google-security review, 3 Nov 2026 night): exchangeIdToken
+    /// had no way to get the nonce POST /auth/google/token now requires —
+    /// fails before getGoogleNonce existed (no such method on AuthClient).
+    func testGetGoogleNonceGetsTheNonceDoorAndHandsItToExchangeIdToken() async throws {
+        StubURLProtocol.queue([
+            .init(body: Data(#"{"nonce":"n-abc123"}"#.utf8)),
+            .init(body: Data(#"{"token":"gm_sess_1","expiresAt":"2026-10-01T00:00:00.000Z","user":{"id":"usr_1","email":"person@example.com"}}"#.utf8)),
+        ])
+        let (g, store) = try client()
+        let nonce = try await g.auth.getGoogleNonce()
+        XCTAssertEqual(nonce, "n-abc123")
+        // ... the app would hand `nonce` to Google's own sign-in SDK here,
+        // which signs it into the ID token it returns.
+        let session = try await g.auth.exchangeIdToken(provider: "google", idToken: "id-token-carrying-\(nonce)")
+        XCTAssertEqual(session.token, "gm_sess_1")
+        let stored = await store.get()
+        XCTAssertEqual(stored, "gm_sess_1")
+
+        let sent = StubURLProtocol.captured
+        XCTAssertEqual(sent[0].line, "GET /auth/google/nonce")
+        XCTAssertEqual(sent[1].line, "POST /auth/google/token")
+        XCTAssertEqual(sent[1].json as NSDictionary?, ["idToken": "id-token-carrying-n-abc123"] as NSDictionary)
+    }
+
+    func testGetGoogleNonceWithNoNonceInTheAnswerIsATypedError() async throws {
+        StubURLProtocol.queue([.init(body: Data("{}".utf8))])
+        let (g, _) = try client()
+        do {
+            _ = try await g.auth.getGoogleNonce()
+            XCTFail("expected a GemmeinError")
+        } catch let error as GemmeinError {
+            XCTAssertEqual(error.code, "invalid_response")
+        }
+    }
+
     func testVerifyEmailCodeStoresTheSessionAndEveryLaterCallCarriesIt() async throws {
         StubURLProtocol.queue([
             .init(body: Data(#"{"token":"gm_sess_1","expiresAt":"2026-10-01T00:00:00.000Z","user":{"id":"usr_1","email":"person@example.com"}}"#.utf8)),

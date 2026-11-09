@@ -12,6 +12,17 @@ not match the npm SDK's. Read the JS SDK's
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-11-09
+
+Pinned to `@gemmein/sdk` 0.24.0 and engine 0.30.0.
+
+- `getGoogleNonce()` and `exchangeIdToken(provider:idToken:)` — Google sign-in from a
+  native app that already holds its own Google sign-in SDK (GoogleSignIn-iOS, outside
+  this package). Call `getGoogleNonce()` first and pass its nonce into Google's sign-in
+  request; the engine refuses an ID token whose nonce it didn't mint for this app, and the
+  same token exchanged twice. `signInWithGoogle()` (the SDK's web redirect) has no native
+  equivalent here on purpose — this is the door iOS uses instead.
+
 ## [0.23.0] — 2026-10-25
 
 Pinned to `@gemmein/sdk` 0.23.0 and engine 0.29.0. Two minor bumps folded into
